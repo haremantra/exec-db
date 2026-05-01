@@ -1,0 +1,23 @@
+exec_db:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: postgres
+      password: postgres
+      dbname: exec_db
+      schema: dbt
+      threads: 4
+      keepalives_idle: 0
+    prod:
+      type: postgres
+      host: "{{ env_var('DBT_HOST') }}"
+      port: 5432
+      user: "{{ env_var('DBT_USER') }}"
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      dbname: "{{ env_var('DBT_DBNAME') }}"
+      schema: dbt
+      threads: 8
+      sslmode: require

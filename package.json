@@ -1,0 +1,22 @@
+{
+  "name": "exec-db",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @exec-db/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:push": "pnpm --filter @exec-db/db db:push",
+    "db:rls": "pnpm --filter @exec-db/db db:rls",
+    "db:studio": "pnpm --filter @exec-db/db db:studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
