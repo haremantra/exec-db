@@ -4,12 +4,14 @@
 
 | Tier | Who | Sees |
 |---|---|---|
-| `exec_all` | CEO, CFO, COO | Everything, including individual comp |
-| `function_lead` | VPs | Their domain in full + aggregated views of others |
-| `manager` | People managers | Their reporting tree (HR data only) |
-| `employee` | (default) | Themselves only |
+| `exec_all` | CEO, CFO, COO | Everything, including individual comp. **Read+write on `crm.*` and `pm.*`.** |
+| `function_lead` | VPs | Their domain in full + aggregated views of others. **Read-only on `crm.*` and `pm.*`.** |
+| `manager` | People managers | Their reporting tree (HR data only). **Read-only on `crm.*` and `pm.*`.** |
+| `employee` | (default) | Themselves only. No CRM/PM access today, but `pm.task` policy already permits self-owned rows so a future audience expansion is a one-line change. |
 
 Fall-through: an authenticated user with no tier mapping defaults to `employee`.
+
+Every write to `crm.*` and `pm.*` is logged via audit trigger to `audit.access_log` (same defense-in-depth pattern as `comp.*`).
 
 ## Defense in depth — four enforcement layers
 

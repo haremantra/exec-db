@@ -22,6 +22,8 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
             <h1 className="text-lg font-semibold tracking-tight">exec-db</h1>
             <nav className="flex gap-4 text-sm text-neutral-600 dark:text-neutral-400">
               <a href="/">Home</a>
+              <a href="/crm/contacts">CRM</a>
+              <a href="/pm/projects">PM</a>
               <a href="/status">Status</a>
             </nav>
           </header>

@@ -4,15 +4,17 @@
 
 | Tier | Purpose | Tech |
 |---|---|---|
-| Warehouse (analytical) | Canonical, joinable copy of all SaaS data. Append-only, time-versioned (SCD2). | Postgres → BigQuery/Snowflake when >100GB |
-| Operational | Things without a SoT yet: board prep notes, OKRs, exec decisions log. | Postgres + Next.js |
+| Operational (the product) | CRM + PM: contacts, call notes, autodrafted follow-ups, projects, tasks, digests. **This app is the system of record.** | Postgres + Next.js + Claude API |
+| Mirror (context) | Read-only copy of HR/Comp/Finance/Legal/Ops data from external SaaS. Append-only, SCD2. Used to enrich CRM/PM with `core.employee_dim`, customer context, etc. | Postgres → BigQuery/Snowflake when >100GB |
 
-We are **not** the system of record for HR, comp, finance, legal, or product. We mirror those.
+The mirror tier still does not own HR/comp/finance/legal/product data — those live in Rippling, Carta, QuickBooks, Ironclad, Stripe. The operational tier (`crm`, `pm`) is the only place this app is authoritative.
 
 ## Domain model
 
 | Domain | SoT | Schema | Key entities |
 |---|---|---|---|
+| **CRM** | **this app** | **`crm`** | **`contact`, `account`, `call_note`, `calendar_event`, `email_thread`, `draft`** |
+| **PM** | **this app** | **`pm`** | **`project`, `task`, `task_dependency`, `digest_send`** |
 | Core (dimensions) | this app | `core` | `entity_dim`, `employee_dim`, `customer_dim`, `vendor_dim`, `date_dim` |
 | HR | Rippling/Gusto/Deel | `hr` | `org_unit`, `employment`, `manager_edge`, `leave` |
 | Compensation | Rippling + Carta + sheets | `comp` | `comp_band`, `salary`, `bonus`, `equity_grant`, `vesting_schedule` |
