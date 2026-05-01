@@ -4,4 +4,6 @@ export * from "./comp.js";
 export * from "./fin.js";
 export * from "./legal.js";
 export * from "./ops.js";
+export * from "./crm.js";
+export * from "./pm.js";
 export * from "./audit.js";

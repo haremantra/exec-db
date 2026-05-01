@@ -141,3 +141,157 @@ CREATE OR REPLACE FUNCTION app.assert_min_cell_size(n integer, min_n integer DEF
   RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
     SELECT n >= min_n;
 $$;
+
+-- ============================================================================
+-- CRM + PM (operational tier, this app is system-of-record).
+--
+-- Audience today is exec-team only:
+--   exec_all          → read + write
+--   function_lead     → read-only
+--   manager           → read-only
+--   employee          → no access (except self-owned pm.task, see below)
+--
+-- We DROP/CREATE every policy idempotently to match the rest of this file.
+-- ============================================================================
+
+-- ----- crm.contact -----
+ALTER TABLE crm.contact ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.contact FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS contact_read ON crm.contact;
+CREATE POLICY contact_read ON crm.contact FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS contact_write ON crm.contact;
+CREATE POLICY contact_write ON crm.contact FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- crm.account -----
+ALTER TABLE crm.account ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.account FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS account_read ON crm.account;
+CREATE POLICY account_read ON crm.account FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS account_write ON crm.account;
+CREATE POLICY account_write ON crm.account FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- crm.call_note -----
+ALTER TABLE crm.call_note ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.call_note FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS call_note_read ON crm.call_note;
+CREATE POLICY call_note_read ON crm.call_note FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS call_note_write ON crm.call_note;
+CREATE POLICY call_note_write ON crm.call_note FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- crm.calendar_event -----
+ALTER TABLE crm.calendar_event ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.calendar_event FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS calendar_event_read ON crm.calendar_event;
+CREATE POLICY calendar_event_read ON crm.calendar_event FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS calendar_event_write ON crm.calendar_event;
+CREATE POLICY calendar_event_write ON crm.calendar_event FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- crm.email_thread -----
+ALTER TABLE crm.email_thread ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.email_thread FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS email_thread_read ON crm.email_thread;
+CREATE POLICY email_thread_read ON crm.email_thread FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS email_thread_write ON crm.email_thread;
+CREATE POLICY email_thread_write ON crm.email_thread FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- crm.draft -----
+ALTER TABLE crm.draft ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.draft FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS draft_read ON crm.draft;
+CREATE POLICY draft_read ON crm.draft FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS draft_write ON crm.draft;
+CREATE POLICY draft_write ON crm.draft FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- pm.project -----
+ALTER TABLE pm.project ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pm.project FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS project_read ON pm.project;
+CREATE POLICY project_read ON pm.project FOR SELECT
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    OR pm.project.owner_id = app.current_user_id()
+  );
+
+DROP POLICY IF EXISTS project_write ON pm.project;
+CREATE POLICY project_write ON pm.project FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- pm.task -----
+-- Reads also include any task an employee owns directly, so a future audience
+-- expansion (giving everyone a digest of their own tasks) is a one-line
+-- middleware change rather than a policy rewrite.
+ALTER TABLE pm.task ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pm.task FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS task_read ON pm.task;
+CREATE POLICY task_read ON pm.task FOR SELECT
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    OR pm.task.owner_id = app.current_user_id()
+  );
+
+DROP POLICY IF EXISTS task_write ON pm.task;
+CREATE POLICY task_write ON pm.task FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- pm.task_dependency -----
+ALTER TABLE pm.task_dependency ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pm.task_dependency FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS task_dependency_read ON pm.task_dependency;
+CREATE POLICY task_dependency_read ON pm.task_dependency FOR SELECT
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+
+DROP POLICY IF EXISTS task_dependency_write ON pm.task_dependency;
+CREATE POLICY task_dependency_write ON pm.task_dependency FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ----- pm.digest_send -----
+ALTER TABLE pm.digest_send ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pm.digest_send FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS digest_send_read ON pm.digest_send;
+CREATE POLICY digest_send_read ON pm.digest_send FOR SELECT
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    OR pm.digest_send.recipient_id = app.current_user_id()
+  );
+
+DROP POLICY IF EXISTS digest_send_write ON pm.digest_send;
+CREATE POLICY digest_send_write ON pm.digest_send FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');

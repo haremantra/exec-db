@@ -10,7 +10,7 @@ export default {
   out: "./migrations",
   dialect: "postgresql",
   dbCredentials: { url },
-  schemaFilter: ["core", "hr", "comp", "fin", "legal", "ops", "audit"],
+  schemaFilter: ["core", "hr", "comp", "fin", "legal", "ops", "crm", "pm", "audit"],
   strict: true,
   verbose: true,
 } satisfies Config;

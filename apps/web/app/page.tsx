@@ -1,46 +1,77 @@
+import { schema } from "@exec-db/db";
+import { count, eq } from "drizzle-orm";
+import Link from "next/link";
 import { getSession } from "@/lib/auth";
+import { query } from "@/lib/db";
 
-const QUESTIONS: Array<{ id: string; title: string; tier: string; phase: number }> = [
-  { id: "runway", title: "Runway at current burn vs. plan", tier: "exec_all", phase: 1 },
-  { id: "headcount", title: "Headcount: actual vs. plan, by function & quarter", tier: "exec_all", phase: 1 },
-  { id: "comp-bands", title: "Comp band drift / outliers >1.5σ from band mid", tier: "exec_all", phase: 2 },
-  { id: "renewals", title: "Contract renewals in next 90 days, by ARR risk", tier: "function_lead", phase: 3 },
-  { id: "vendor-spend", title: "Top 10 vendors by spend, MoM change", tier: "exec_all", phase: 1 },
-  { id: "funnel", title: "Hiring funnel conversion by stage & source", tier: "function_lead", phase: 1 },
-  { id: "ndr", title: "Net dollar retention & gross margin trend", tier: "exec_all", phase: 4 },
-  { id: "okrs", title: "OKR progress (R/Y/G)", tier: "function_lead", phase: 4 },
-];
+export const dynamic = "force-dynamic";
 
 export default async function Home(): Promise<JSX.Element> {
   const session = await getSession();
+  if (!session) {
+    return <p className="text-sm">Sign in required.</p>;
+  }
+
+  const ctx = {
+    userId: session.userId,
+    tier: session.tier,
+    functionArea: session.functionArea,
+  };
+
+  const counts = await query(ctx, async (tx) => {
+    const [c] = await tx.select({ n: count() }).from(schema.contact);
+    const [p] = await tx
+      .select({ n: count() })
+      .from(schema.project)
+      .where(eq(schema.project.status, "active"));
+    const [d] = await tx
+      .select({ n: count() })
+      .from(schema.draft)
+      .where(eq(schema.draft.status, "pending"));
+    return { contacts: c?.n ?? 0, projects: p?.n ?? 0, drafts: d?.n ?? 0 };
+  });
+
+  const cards: Array<{ href: string; title: string; subtitle: string; n: number }> = [
+    {
+      href: "/crm/contacts",
+      title: "Contacts (CRM)",
+      subtitle: "People and call notes",
+      n: counts.contacts,
+    },
+    {
+      href: "/pm/projects",
+      title: "Active projects (PM)",
+      subtitle: "Projects and tasks",
+      n: counts.projects,
+    },
+    {
+      href: "/crm/contacts",
+      title: "Drafts pending review",
+      subtitle: "Autodrafted follow-ups awaiting your call",
+      n: counts.drafts,
+    },
+  ];
 
   return (
     <div className="space-y-8">
       <section>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          {session
-            ? `Signed in as ${session.email} (${session.tier})`
-            : "Not signed in — using stub session"}
+          Signed in as {session.email} ({session.tier})
         </p>
       </section>
 
-      <section>
-        <h2 className="mb-3 text-base font-medium">Exec questions</h2>
-        <ul className="divide-y divide-neutral-200 rounded-md border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-          {QUESTIONS.map((q) => (
-            <li key={q.id} className="flex items-center justify-between px-4 py-3 text-sm">
-              <span>{q.title}</span>
-              <span className="flex gap-2 text-xs text-neutral-500">
-                <span className="rounded border border-neutral-300 px-2 py-0.5 dark:border-neutral-700">
-                  {q.tier}
-                </span>
-                <span className="rounded border border-neutral-300 px-2 py-0.5 dark:border-neutral-700">
-                  Phase {q.phase}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
+      <section className="grid grid-cols-3 gap-4">
+        {cards.map((c) => (
+          <Link
+            key={c.title}
+            href={c.href}
+            className="rounded-md border border-neutral-200 p-4 hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600"
+          >
+            <div className="text-3xl font-semibold">{c.n}</div>
+            <div className="mt-1 text-sm font-medium">{c.title}</div>
+            <div className="text-xs text-neutral-500">{c.subtitle}</div>
+          </Link>
+        ))}
       </section>
     </div>
   );
