@@ -8,7 +8,7 @@
 _Last updated: 2026-05-07_
 
 ## A. Role and rhythms
-- **W1.1** title / functions owned: _unanswered_
+- **W1.1** title / functions owned: CEO. Functions actually owned week-to-week: prospecting (LinkedIn Sales Navigator + sales calls); developing decks for current customers and walk-through self-service demos; emails and replies to social media; drafting newsletter; writing thought leadership articles; investor decks.
 - **W1.2** Monday morning walkthrough: _unanswered_
 - **W1.3** good week vs bad week signal: _unanswered_
 - **W1.4** scheduled vs unscheduled hours: _unanswered_
