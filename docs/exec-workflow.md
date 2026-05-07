@@ -46,9 +46,9 @@ _Last updated: 2026-05-07_
 - **W5.5** trust Gmail-saved drafts: yes, would trust.
 
 ## F. Projects and tasks
-- **W6.1** "project" definition: _unanswered_
-- **W6.2** where tasks live today: _unanswered_
-- **W6.3** how slipped tasks resurface: _unanswered_
+- **W6.1** "project" definition: a sales call; a licensing negotiation.
+- **W6.2** where tasks live today: head, emails, notebooks — decentralized.
+- **W6.3** how slipped tasks resurface: ~50% slip past their date today. (Ideal resurfacing mechanism not yet specified.)
 - **W6.4** delegation confirmation: _unanswered_
 - **W6.5** blocked vs stuck vs waiting: _unanswered_
 - **W6.6** 5 fields on a "this week" screen: _unanswered_
