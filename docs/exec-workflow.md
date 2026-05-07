@@ -32,11 +32,11 @@ _Last updated: 2026-05-07_
 
 ## D. Follow-up workflow
 - **W4.1** typical follow-up content: varies but needs consistency — what was discussed, who has deliverables, due dates, when.
-- **W4.2** time to write today: _unanswered_
-- **W4.3** % sent within 24h: _unanswered_
-- **W4.4** what's usually wrong with a draft: _unanswered_
-- **W4.5** draft-for / draft-with / remind preference: _unanswered_
-- **W4.6** worst-case system behavior: _unanswered_
+- **W4.2** time to write today: 2–8 hours.
+- **W4.3** % sent within 24h: ~40%.
+- **W4.4** what's usually wrong with a draft: tone, facts.
+- **W4.5** draft-for / draft-with / remind preference: draft for me, for my review.
+- **W4.6** worst-case system behavior: send a note without my review; send confidential or proprietary info.
 
 ## E. Email and inbox reality
 - **W5.1** email accounts in use: _unanswered_
