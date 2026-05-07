@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { renderMarkdown } from "@/lib/markdown";
 import { addCallNote, discardDraft } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,10 @@ export default async function ContactDetailPage({
                 className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950"
               >
                 <div className="mb-1 font-medium">{d.subject ?? "(no subject)"}</div>
-                <pre className="whitespace-pre-wrap font-sans text-sm">{d.bodyMarkdown}</pre>
+                <div
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(d.bodyMarkdown) }}
+                />
                 {canWrite && (
                   <form action={discardDraft.bind(null, d.id, id)} className="mt-2">
                     <button
@@ -138,7 +142,10 @@ export default async function ContactDetailPage({
               className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
             >
               <div className="mb-1 text-xs text-neutral-500">{n.occurredAt.toISOString()}</div>
-              <pre className="whitespace-pre-wrap font-sans text-sm">{n.markdown}</pre>
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(n.markdown) }}
+              />
             </li>
           ))}
         </ul>
