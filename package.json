@@ -14,6 +14,7 @@
     "test": "pnpm -r test",
     "db:push": "pnpm --filter @exec-db/db db:push",
     "db:rls": "pnpm --filter @exec-db/db db:rls",
+    "db:seed": "pnpm --filter @exec-db/db db:seed",
     "db:studio": "pnpm --filter @exec-db/db db:studio",
     "vision-check": "tsx scripts/vision-check.ts"
   },
