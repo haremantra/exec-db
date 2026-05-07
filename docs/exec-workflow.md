@@ -11,8 +11,8 @@ _Last updated: 2026-05-07_
 - **W1.1** title / functions owned: CEO. Functions actually owned week-to-week: prospecting (LinkedIn Sales Navigator + sales calls); developing decks for current customers and walk-through self-service demos; emails and replies to social media; drafting newsletter; writing thought leadership articles; investor decks.
 - **W1.2** Monday morning walkthrough: open business email app on Gmail Workspace; open Substacks and LinkedIn posts; work with Claude Code and Claude cowork to organize files and update product; write newsletters through Perplexity; LinkedIn Sales Navigator and ad campaigns; paying bills; getting others to help with this work.
 - **W1.3** good week vs bad week signal: Good week = no weekend busy work but time to ideate; workday handles emails to inbox-zero for customers; prospecting funnel is operational and any replies are addressed and scheduled. (Bad week = inverse, not yet specified.)
-- **W1.4** scheduled vs unscheduled hours: _unanswered_
-- **W1.5** task you'd most regret forgetting: _unanswered_
+- **W1.4** scheduled vs unscheduled hours: ~15 hours/week in scheduled meetings; 3–5 hours/week unscheduled.
+- **W1.5** task you'd most regret forgetting: prospecting curation to develop new leads; thought-leadership articles not drafted.
 
 ## B. Contact lifecycle
 - **W2.1** contact categories + counts: _unanswered_
