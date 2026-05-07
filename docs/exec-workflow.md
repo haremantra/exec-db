@@ -23,12 +23,12 @@ _Last updated: 2026-05-07_
 - **W2.6** sensitive / never-in-digest contacts: yes — customers who rolled off a product, and salespeople pitching a service I don't need.
 
 ## C. Call and meeting capture
-- **W3.1** current note tool: _unanswered_
-- **W3.2** written vs head-only: _unanswered_
-- **W3.3** lag from call to capture: _unanswered_
-- **W3.4** note that paid off: _unanswered_
-- **W3.5** note you wish you'd written: _unanswered_
-- **W3.6** first three searches you'd run: _unanswered_
+- **W3.1** current note tool: paper, but needs a digital option.
+- **W3.2** written vs head-only: writes opportunities and friction; avoids how-to-do-something and tasks (the latter should be more consistent).
+- **W3.3** lag from call to capture: immediately, within 30 minutes, if a customer or prospect.
+- **W3.4** note that paid off: scratchpad ideation for a build via Claude Code.
+- **W3.5** note you wish you'd written: potential build-partner contact and product discount.
+- **W3.6** first three searches you'd run: "update request — delivered when".
 
 ## D. Follow-up workflow
 - **W4.1** typical follow-up content: _unanswered_
