@@ -3,16 +3,22 @@ import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { addCallNote, discardDraft } from "../actions";
+import { renderMarkdown } from "@/lib/markdown";
+import { addCallNote, discardDraft, updateCallNote } from "../actions";
+
+const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
 
 export default async function ContactDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ edit?: string }>;
 }): Promise<JSX.Element> {
   const { id } = await params;
+  const { edit: editingNoteId } = await searchParams;
   const session = await getSession();
   if (!session) return <p className="text-sm">Sign in required.</p>;
 
@@ -83,7 +89,10 @@ export default async function ContactDetailPage({
                 className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950"
               >
                 <div className="mb-1 font-medium">{d.subject ?? "(no subject)"}</div>
-                <pre className="whitespace-pre-wrap font-sans text-sm">{d.bodyMarkdown}</pre>
+                <div
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(d.bodyMarkdown) }}
+                />
                 {canWrite && (
                   <form action={discardDraft.bind(null, d.id, id)} className="mt-2">
                     <button
@@ -132,15 +141,68 @@ export default async function ContactDetailPage({
           {data.notes.length === 0 && (
             <li className="text-sm text-neutral-500">No notes yet.</li>
           )}
-          {data.notes.map((n) => (
-            <li
-              key={n.id}
-              className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
-            >
-              <div className="mb-1 text-xs text-neutral-500">{n.occurredAt.toISOString()}</div>
-              <pre className="whitespace-pre-wrap font-sans text-sm">{n.markdown}</pre>
-            </li>
-          ))}
+          {data.notes.map((n) => {
+            const isEditing = editingNoteId === n.id;
+            const withinWindow =
+              Date.now() - n.createdAt.getTime() <= NOTE_EDIT_WINDOW_MS;
+            const isAuthor = n.authorId === session.userId;
+            const canEdit = canWrite && isAuthor && withinWindow;
+            return (
+              <li
+                key={n.id}
+                className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
+              >
+                <div className="mb-1 flex items-center justify-between text-xs text-neutral-500">
+                  <span>{n.occurredAt.toISOString()}</span>
+                  {canEdit && !isEditing && (
+                    <a
+                      href={`?edit=${n.id}#note-${n.id}`}
+                      id={`note-${n.id}`}
+                      className="text-xs underline hover:text-neutral-900 dark:hover:text-neutral-200"
+                    >
+                      Edit
+                    </a>
+                  )}
+                  {!withinWindow && isAuthor && (
+                    <span className="text-xs italic">Edit window expired</span>
+                  )}
+                </div>
+                {isEditing && canEdit ? (
+                  <form
+                    action={updateCallNote.bind(null, n.id, id)}
+                    className="space-y-2"
+                  >
+                    <textarea
+                      name="markdown"
+                      required
+                      rows={5}
+                      defaultValue={n.markdown}
+                      className="block w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="rounded bg-neutral-900 px-3 py-1.5 text-xs text-white dark:bg-neutral-100 dark:text-neutral-900"
+                      >
+                        Save changes
+                      </button>
+                      <a
+                        href="?"
+                        className="rounded border border-neutral-300 px-3 py-1.5 text-xs dark:border-neutral-700"
+                      >
+                        Cancel
+                      </a>
+                    </div>
+                  </form>
+                ) : (
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(n.markdown) }}
+                  />
+                )}
+              </li>
+            );
+          })}
         </ul>
       </section>
 

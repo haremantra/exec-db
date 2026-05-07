@@ -62,6 +62,39 @@ export async function addCallNote(contactId: string, formData: FormData): Promis
   revalidatePath(`/crm/contacts/${contactId}`);
 }
 
+const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export async function updateCallNote(
+  noteId: string,
+  contactId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+  const markdown = String(formData.get("markdown") ?? "").trim();
+  if (!markdown) throw new Error("markdown is required");
+
+  await query(ctx(session), async (tx) => {
+    const [note] = await tx
+      .select({ createdAt: schema.callNote.createdAt, authorId: schema.callNote.authorId })
+      .from(schema.callNote)
+      .where(and(eq(schema.callNote.id, noteId), eq(schema.callNote.contactId, contactId)))
+      .limit(1);
+
+    if (!note) throw new Error("note not found");
+    if (note.authorId !== session!.userId) throw new Error("only the author can edit");
+    if (Date.now() - note.createdAt.getTime() > NOTE_EDIT_WINDOW_MS) {
+      throw new Error("edit window expired (24h after creation)");
+    }
+
+    await tx
+      .update(schema.callNote)
+      .set({ markdown, updatedAt: new Date() })
+      .where(eq(schema.callNote.id, noteId));
+  });
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+}
+
 export async function discardDraft(draftId: string, contactId: string): Promise<void> {
   const session = await getSession();
 
