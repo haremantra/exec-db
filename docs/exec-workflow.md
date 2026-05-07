@@ -39,11 +39,11 @@ _Last updated: 2026-05-07_
 - **W4.6** worst-case system behavior: send a note without my review; send confidential or proprietary info.
 
 ## E. Email and inbox reality
-- **W5.1** email accounts in use: _unanswered_
-- **W5.2** triage habits: _unanswered_
-- **W5.3** threads re-read repeatedly: _unanswered_
-- **W5.4** must-not-read senders: _unanswered_
-- **W5.5** trust Gmail-saved drafts: _unanswered_
+- **W5.1** email accounts in use: 2 — personal and professional.
+- **W5.2** triage habits: search and read; don't label, folder, or triage with deletes or archiving.
+- **W5.3** threads re-read repeatedly: internal ops emails.
+- **W5.4** must-not-read senders: yes — don't read or quote from customers to prevent cross-pollination.
+- **W5.5** trust Gmail-saved drafts: yes, would trust.
 
 ## F. Projects and tasks
 - **W6.1** "project" definition: _unanswered_
