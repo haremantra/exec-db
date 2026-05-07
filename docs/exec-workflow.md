@@ -31,7 +31,7 @@ _Last updated: 2026-05-07_
 - **W3.6** first three searches you'd run: "update request — delivered when".
 
 ## D. Follow-up workflow
-- **W4.1** typical follow-up content: _unanswered_
+- **W4.1** typical follow-up content: varies but needs consistency — what was discussed, who has deliverables, due dates, when.
 - **W4.2** time to write today: _unanswered_
 - **W4.3** % sent within 24h: _unanswered_
 - **W4.4** what's usually wrong with a draft: _unanswered_
