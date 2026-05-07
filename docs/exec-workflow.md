@@ -15,12 +15,12 @@ _Last updated: 2026-05-07_
 - **W1.5** task you'd most regret forgetting: prospecting curation to develop new leads; thought-leadership articles not drafted.
 
 ## B. Contact lifecycle
-- **W2.1** contact categories + counts: _unanswered_
-- **W2.2** how new contacts enter: _unanswered_
-- **W2.3** "I need to remember this person" moment: _unanswered_
-- **W2.4** missing pre-call context: _unanswered_
-- **W2.5** weekly follow-up triage rule: _unanswered_
-- **W2.6** sensitive / never-in-digest contacts: _unanswered_
+- **W2.1** contact categories + counts: Investors ~1 active/week; customers 3–5/week; prospects 10–15 bi-weekly; contractors 3–4/week; board members ~1/week.
+- **W2.2** how new contacts enter: many — inbound email, LinkedIn card or invite, conferences and meetups. LinkedIn and inbound email are most common.
+- **W2.3** "I need to remember this person" moment: commit to memory, coin-flip odds I remember to catalog later.
+- **W2.4** missing pre-call context: what they're working on; the job-to-be-done they focus on; current project or employment; do they have a perspective I can read online; how can I help them.
+- **W2.5** weekly follow-up triage rule: can I help the person and can they help me — better yet, will they pilot our tool.
+- **W2.6** sensitive / never-in-digest contacts: yes — customers who rolled off a product, and salespeople pitching a service I don't need.
 
 ## C. Call and meeting capture
 - **W3.1** current note tool: _unanswered_
