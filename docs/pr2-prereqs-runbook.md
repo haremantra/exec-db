@@ -41,7 +41,7 @@ later.
 2. **Create a new project.**
    1. Click the project picker at the top (left of the search bar).
    2. Click **NEW PROJECT** (top right of the dialog).
-   3. **Project name**: `exec-db`. Leave the auto-generated **Project ID** as is, or change to `exec-db-prod` if `exec-db` is taken.
+   3. **Project name**: `exec-db`. Leave the auto-generated **Project ID** as-is — Google appends a random suffix (e.g. `exec-db-471203`) so it stays globally unique. If you want a custom ID, use something distinctive like `exec-db-<your-company>` to avoid collisions; do not assume `exec-db-prod` is available.
    4. **Organization**: select your Workspace organization (matches your domain).
    5. Click **CREATE**. Wait ~30 s for the project to provision.
    6. **Copy the Project ID** into your notes (you'll see it in the picker after the project is created — it ends with a random suffix like `exec-db-471203`).
@@ -71,8 +71,8 @@ later.
    2. Search: `Gmail API`.
    3. Click → **ENABLE**.
 
-8. **(Optional) Enable the Google Sheets API.**
-   Needed for the audit-log Sheet writer in P4.
+8. **Enable the Google Sheets API.**
+   Required for the audit-log Sheet writer in P4 (Category 6).
    1. Back to Library.
    2. Search: `Google Sheets API`.
    3. **ENABLE**.
@@ -167,8 +167,17 @@ later.
     1. Click the service-account email to open it.
     2. Tab **KEYS** → **ADD KEY → Create new key**.
     3. **Key type**: `JSON`. Click **CREATE**.
-    4. A `.json` file downloads. **Move it to** `~/exec-db-secrets/audit-writer.json` (create the folder if needed). Do NOT commit this file to git.
-    5. **Copy the absolute path** of the file into your notes — you'll reference it from `.env`.
+    4. A `.json` file downloads. From Terminal, move it to a fixed location:
+       ```bash
+       mkdir -p ~/exec-db-secrets
+       mv ~/Downloads/<downloaded-name>.json ~/exec-db-secrets/audit-writer.json
+       ```
+       Do NOT commit this file to git.
+    5. **Capture the absolute path** for `.env`. The app does not expand `~`, so use the full `/Users/<your-mac-username>/exec-db-secrets/audit-writer.json`. From Terminal:
+       ```bash
+       echo "$HOME/exec-db-secrets/audit-writer.json"
+       ```
+       Paste the printed line into your notes verbatim — it's already absolute and `~`-free.
 
 ---
 
@@ -179,13 +188,14 @@ later.
     2. Click **+ Blank** to make a new sheet.
     3. **Rename** the file (top-left) to `exec-db prompt audit log YYYY-MM` (current year-month). The sheet rotates monthly later; this is the first one.
 
-28. **Add the header row** (paste into row 1, A1):
+28. **Add the header row.**
+    Type the 9 column names directly into cells **A1 through I1**, one name per cell, in this order:
 
-    ```
-    timestamp_utc | contact_id | model | prompt_class | redacted_input_hash | response_hash | input_tokens | output_tokens | cost_usd
-    ```
+    | A1 | B1 | C1 | D1 | E1 | F1 | G1 | H1 | I1 |
+    |---|---|---|---|---|---|---|---|---|
+    | `timestamp_utc` | `contact_id` | `model` | `prompt_class` | `redacted_input_hash` | `response_hash` | `input_tokens` | `output_tokens` | `cost_usd` |
 
-    Paste that with **tab-separated cells** so it lands in A1:I1.
+    (If you prefer to paste rather than type: select cell A1, then paste the line `timestamp_utc<TAB>contact_id<TAB>…<TAB>cost_usd` where `<TAB>` is a real tab character. Most browsers preserve tabs from a code editor; pasting from this rendered doc may not, so typing is safer.)
 
 29. **Freeze the header.** View → Freeze → 1 row.
 
@@ -220,7 +230,8 @@ This is the only step that touches the dev machine. Have whoever runs the dev se
 
     # Audit-log Sheet (P4)
     GOOGLE_SHEETS_AUDIT_ID=
-    GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH=/Users/<you>/exec-db-secrets/audit-writer.json
+    # Use the absolute path from step 26.5 (no leading ~ — it does not expand from .env)
+    GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH=
     ```
 
 34. **Paste the values** from your notes:
@@ -231,11 +242,12 @@ This is the only step that touches the dev machine. Have whoever runs the dev se
 
 35. **Save and close.** `⌘+S` then close TextEdit.
 
-36. **Confirm `.env` is gitignored.** From Terminal:
+36. **Confirm `.env` is actually ignored.** From Terminal:
     ```bash
-    grep -n '^.env' ~/code/exec-db/.gitignore
+    cd ~/code/exec-db
+    git check-ignore -v .env
     ```
-    You should see `.env` listed. If not, stop and tell the dev — the secrets must not commit.
+    You should see a line like `.gitignore:5:.env  .env` — proving the file is ignored *and* showing which rule did it. If the command prints nothing or exits with a non-zero status, **stop and tell the dev** — the secrets are about to commit. (`grep '^.env' .gitignore` is not enough: `.` is a regex wildcard and later negation rules can override an earlier match.)
 
 ---
 
