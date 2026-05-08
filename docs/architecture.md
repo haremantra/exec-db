@@ -1,5 +1,60 @@
 # Architecture
 
+## Monday dashboard (PR3-L — US-017, W6.6)
+
+The Monday "What matters this week" dashboard is a force-dynamic server component at
+`/dashboard` that renders exactly **five swimlanes** every time the exec opens it.
+
+### Lane definitions
+
+| # | Lane name | Source | Filter |
+|---|---|---|---|
+| 1 | **Prospects to follow up** | `crm.contact` | `triage_tag IN ('can_help_them', 'can_help_me', 'pilot_candidate')` AND last `call_note.occurred_at > 7 days ago` (or no notes) AND `sensitive_flag IS NULL` |
+| 2 | **Inbox progress** | `crm.draft` (count) + Gmail unread stub | `draft.status = 'pending'`; Gmail unread is `null` until Stream A lands `getGmailUnreadCount()`. |
+| 3 | **Admin (vendors / contractors)** | `pm.task` | `work_area = 'admin'` AND `status != 'done'` |
+| 4 | **Thought leadership** | `pm.task` | `work_area = 'thought_leadership'` AND `status != 'done'` |
+| 5 | **Product roadmap** | `pm.task` joined `pm.project` | `work_area NOT IN ('admin', 'thought_leadership')` AND `project.project_type IN ('hire', 'deal', 'okr', 'other')` AND `status != 'done'` |
+
+All task lanes show at most **5 items**.
+
+### Tie-break ordering (within each task lane)
+
+```
+1. is_pinned DESC          — pinned items always at top (US-004)
+2. IMPACT order:           both=1, revenue=2, reputation=3, neither=4, null=5
+3. priority ASC            — lower number = higher priority
+4. due_date ASC NULLS LAST — soonest due date first
+```
+
+Pinning survives across calendar weeks and is never auto-cleared (US-004).
+
+### Empty-lane handling
+
+Each empty lane renders a one-line prompt explaining what would populate it.
+The `getDashboardLanes()` function always returns arrays; the page component owns the empty-state UI.
+
+### Cross-cutting invariant #6
+
+> The Monday "What matters this week" view contains exactly the five swimlanes
+> the exec named — not four, not six. (user-stories.md invariant #6, US-017)
+
+Enforced by: `apps/web/__tests__/dashboard.test.ts` (lane-count regression test).
+
+### Stream M placeholder
+
+`<div id="do-this-first" />` above the swimlanes is reserved for Stream M's
+"Do this first" counterfactual card (US-024, SY-013). Stream M edits
+`apps/web/app/dashboard/page.tsx` to fill that stub.
+
+### Data layer
+
+`apps/web/lib/dashboard.ts` exports `getDashboardLanes(session): Promise<DashboardLanes>`.
+- All queries go through `query()` so RLS applies.
+- No LLM calls — pure SQL + in-memory ordering.
+- Returns `{ prospects, inbox, admin, thoughtLeadership, productRoadmap }` — always exactly 5 keys.
+
+---
+
 ## PR3 task ergonomics — new columns (K1-K4)
 
 Four columns added in `PR3-K` that downstream streams depend on.
