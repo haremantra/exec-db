@@ -149,3 +149,81 @@ audit trail).
 | Every LLM call audited | `recordLlmCall` inside `safeAnthropic` | `audit-llm.test.ts` |
 | Confidential guard | `assertSafeForGmail` before Gmail save | `autodraft.test.ts` |
 | No phone/first-touch automation | `assertNotAutomatedOutbound` | `autodraft.test.ts` |
+
+## Counterfactual ranker (Stream M — PR3-M)
+
+The Monday "Do this first" recommendation. Cross-cutting invariant #7
+(`docs/pr3-spec.md`) requires that every top pick carries a counterfactual:
+the system explains what it deprioritized and why. This is the trust threshold
+the exec asked for in W8.3 — without it, the suggestion is untrusted and
+ignored.
+
+### Data flow
+
+```
+1. Dashboard page loads (apps/web/app/dashboard/page.tsx)
+   │
+   ▼
+2. SELECT pm.task WHERE owner_id = session.userId AND status != 'done'
+   ORDER BY is_pinned DESC, updated_at DESC LIMIT 20
+   │
+   ▼
+3. rankTasks(candidates, session)            [apps/web/lib/ranker.ts]
+   │
+   ├─ pickCandidates(): trims to ≤10. Pinned items always included
+   │   (dashboard contract: pinned ≥ pick eligible).
+   │
+   ├─ buildPrompt(): one line per task with id, title, work_area,
+   │   impact, is_pinned, due_date, priority, status. Asks for a strict
+   │   JSON object: { topPick: {taskId, reason},
+   │                   alternatives: [{taskId, deprioritizationReason}, …≤3] }.
+   │   System prompt explicitly mentions "counterfactual" — regression-
+   │   guarded by ranker.test.ts.
+   │
+   ├─ safeAnthropic({ model: "opus", system, prompt,
+   │                  contactId: null, promptClass: "rank" })
+   │   ├─ redact(prompt) — task titles can contain PII (SY-016)
+   │   ├─ Anthropic SDK call (claude-opus-4-7 — correctness-critical)
+   │   └─ recordLlmCall(…) — audit.llm_call row with cost (SY-017)
+   │
+   ├─ tryParseRanking(): strips code fences, parses JSON, drops any
+   │   alternatives whose taskId isn't in the candidate set
+   │   (hallucination guard).
+   │
+   └─ Fallback paths (any of: SDK error, JSON parse failure, hallucinated
+      ids) → deterministicRank(): pinned > impact (both > revenue >
+      reputation > neither > null) > priority (low number wins) >
+      due_date (earlier wins) > title alphabetic.  The dashboard always
+      renders SOMETHING — the trust signal is "we'd rather show a known-
+      coarse fallback than crash."
+```
+
+### "I disagree" override
+
+When the exec rejects the top pick, `disagreeWithRanker(formData)` →
+`recordRankingOverride(ranking, chosenTaskId, session)` writes a single row
+to `audit.access_log` with:
+
+- `intent`: `"exec overrode ranker top pick — chose <chosen> instead of <original>; reason absent"`.
+- `metadata.ranking`: the full `RankingResult` JSON, so an auditor can replay
+  exactly what the exec was offered.
+- `metadata.chosenTaskId` / `originalTopPickId`: explicit fields for queries.
+
+This mirrors the `saveDraftToGmailConfirmed` audit pattern (AD-003) — the
+override is non-destructive and replayable.
+
+### Model choice
+
+| Path | Model | Why |
+|---|---|---|
+| Vision check, briefing, autodraft | Sonnet | summarization + structured generation; cheap. |
+| Counterfactual ranker | **Opus** | scoring + rationale must be defensible — the recommendation only ships if the exec believes it. |
+
+### Files
+
+| File | Owner | Purpose |
+|---|---|---|
+| `apps/web/lib/ranker.ts` | M | `rankTasks`, `recordRankingOverride`, `deterministicRank` |
+| `apps/web/app/dashboard/page.tsx` | L (layout) + M (card) | Renders "Do this first" card; M filled L's `<div id="do-this-first" />` stub |
+| `apps/web/app/dashboard/actions.ts` | M | `disagreeWithRanker` server action |
+| `apps/web/__tests__/ranker.test.ts` | M | 12 tests including the invariant #7 regression guard |
