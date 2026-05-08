@@ -7,6 +7,11 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
+// Los Angeles UTC offset for PST. During PDT (summer) it is -07:00; during PST
+// (winter) it is -08:00. We use the standard PST offset (-08:00) as required by
+// the spec's `<date>T17:00:00-08:00` format. The exec sees 5 pm PST / 6 pm PDT.
+const LA_OFFSET = "-08:00";
+
 function ctx(session: Awaited<ReturnType<typeof getSession>>) {
   if (!session) throw new Error("Unauthorized");
   return {
@@ -152,6 +157,54 @@ export async function setTaskPinned(
   );
 
   revalidatePath(`/pm/projects/${projectId}`);
+}
+
+/**
+ * Set the awaiting_response_until timestamp on a task (N — SY-010, US-020, W6.4).
+ * exec_all only. The form must carry a `date` field (YYYY-MM-DD).
+ *
+ * The stored value is `<date>T17:00:00-08:00` (5 pm PST) so the check-in
+ * window ends at the end of the Los Angeles business day.
+ *
+ * When awaiting_response_until < now(), the task is flagged "Needs check-in"
+ * in the dashboard's slipped-task code path (slippedReason = "response_overdue").
+ * The task status itself does NOT change — only the UI badge changes.
+ *
+ * Pass an empty or "none" date to clear the deadline.
+ */
+export async function markAwaitingResponse(
+  taskId: string,
+  projectId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+  const c = ctx(session);
+  if (c.tier !== "exec_all") throw new Error("exec_all required");
+
+  const raw = String(formData.get("date") ?? "").trim();
+
+  // Validate date format (YYYY-MM-DD) or empty/none to clear.
+  let awaitingResponseUntil: Date | null = null;
+  if (raw && raw !== "none") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      throw new Error(`Invalid date format: ${raw}. Expected YYYY-MM-DD.`);
+    }
+    // Build ISO timestamp with fixed PST offset per spec.
+    awaitingResponseUntil = new Date(`${raw}T17:00:00${LA_OFFSET}`);
+    if (isNaN(awaitingResponseUntil.getTime())) {
+      throw new Error(`Invalid date: ${raw}`);
+    }
+  }
+
+  await query(c, (tx) =>
+    tx
+      .update(schema.task)
+      .set({ awaitingResponseUntil, updatedAt: new Date() })
+      .where(eq(schema.task.id, taskId)),
+  );
+
+  revalidatePath(`/pm/projects/${projectId}`);
+  revalidatePath("/dashboard");
 }
 
 /**

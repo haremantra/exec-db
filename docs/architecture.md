@@ -1,5 +1,150 @@
 # Architecture
 
+## Slipped tasks + Tuesday cohort (Stream N — PR3-N)
+
+Stream N delivers two data-surfacing features: the Tuesday close-ready cohort
+(US-025, SY-015) and slipped-task resurfacing (SY-009, SY-010).
+
+### Tuesday close-ready cohort
+
+`apps/web/lib/close-ready.ts` exports `getCloseReadyCohort(session)`.
+
+A contact is **close-ready** when ALL of:
+1. Has a recent touch: `crm.email_thread.last_message_at >= now() - 7 days`, OR
+   `crm.call_note.occurred_at >= now() - 7 days`.
+2. `crm.contact.triage_tag IN ('pilot_candidate', 'can_help_me')` (qualified).
+3. No active blocker: no `pm.task` with `status IN ('blocked', 'stuck')` that
+   references this contact (via the contact's email threads or call notes).
+4. Not sensitive (enforced automatically by RLS on `crm.contact`).
+
+Returns ≤10 contacts ordered by most-recent touch DESC.
+Each row includes `contactId`, `contactName`, `lastTouchAt`, `lastTouchKind`
+("email" or "note"), `qualifierTag`.
+
+On Tuesdays (`new Date().getDay() === 2` as a stand-in for America/Los_Angeles),
+the dashboard prepends a "Sales — close-ready" section ABOVE the "Do this first"
+card. Each row has two action buttons:
+- "Draft close email" → `/crm/contacts/{id}?autodraft_tone=warm-sales-followup`
+- "Schedule call" → Google Calendar new-event URL (no auth required to open).
+
+The digest (`apps/web/lib/digest-body.ts`) also adds a "Sales — close-ready"
+section on Tuesdays via `buildCloseReadySection()`.
+
+### Slipped-task resurfacing
+
+`apps/web/lib/slipped-tasks.ts` exports `getSlippedTasks(session)`.
+
+A task is **slipped** when ANY of:
+- `due_date < current_date AND status NOT IN ('done')` → `slippedReason: "overdue"`
+- `awaiting_response_until < now() AND status NOT IN ('done')` → `slippedReason: "response_overdue"`
+
+The "response_overdue" reason implements the **"Needs check-in"** badge: the
+task status is NOT changed automatically; the dashboard displays a badge so the
+exec can decide to draft a check-in email.
+
+**Hint detection**: for each slipped task, Stream N checks whether any
+`crm.email_thread.subject` ILIKE-matches the first ≥6 characters of the task
+title. If yes, `unblockHint: { threadId, subject }` is attached. Pure SQL — no
+LLM. Stream P will replace this with richer matching if needed.
+
+The dashboard shows:
+1. A "Needs attention" banner under the header listing the slipped count.
+2. Slipped tasks at the TOP of their respective swimlane (their `work_area` lane),
+   styled with a red dot badge. The 5-swimlane invariant (#6) is preserved —
+   slipped tasks do NOT add a 6th swimlane.
+
+The digest adds a "Slipped this week" section via `buildSlippedSection()`.
+
+### check-in nudge (markAwaitingResponse)
+
+`apps/web/app/pm/projects/actions.ts` gains `markAwaitingResponse(taskId, projectId, formData)`:
+- `exec_all` only.
+- `formData` must carry a `date` field (YYYY-MM-DD).
+- Stores `<date>T17:00:00-08:00` (5 pm PST) in `pm.task.awaiting_response_until`.
+- Once the deadline passes, `getSlippedTasks` returns the task with
+  `slippedReason: "response_overdue"` and the UI shows a "Needs check-in" badge.
+
+### Digest composability
+
+`buildSlippedSection(tasks)` and `buildCloseReadySection(contacts)` are
+exported from `digest-body.ts` so Stream P can call them from the Claude-ranked
+body assembler without code duplication. The O stub calls them internally via
+dynamic import; P should call them directly.
+
+### Files (Stream N)
+
+| File | Purpose |
+|---|---|
+| `apps/web/lib/close-ready.ts` | `getCloseReadyCohort()` — close-ready SQL query |
+| `apps/web/lib/slipped-tasks.ts` | `getSlippedTasks()` — slipped-task SQL query + hint |
+| `apps/web/app/dashboard/page.tsx` | Tuesday cohort section + slipped banner + `SWIMLANE_KEYS` constant |
+| `apps/web/lib/digest-body.ts` | `buildSlippedSection()` + `buildCloseReadySection()` |
+| `apps/web/app/pm/projects/actions.ts` | `markAwaitingResponse()` server action |
+| `apps/web/__tests__/close-ready-and-slipped.test.ts` | 12 tests including invariant #6 regression guard |
+
+### Concurrency notes (streams P, Q)
+
+- Stream P: do NOT replace `buildSlippedSection` / `buildCloseReadySection`
+  — call them from the new ranked body function. The TODO comments in
+  `digest-body.ts` explain the handoff.
+- Stream Q: may add a priority-shifter banner in `dashboard/page.tsx`.
+  Place it after the Stream N slipped banner, labeled `{/* Stream Q */}`.
+- Stream N additions in `dashboard/page.tsx` are labeled `{/* Stream N */}`.
+## Monday dashboard (PR3-L — US-017, W6.6)
+
+The Monday "What matters this week" dashboard is a force-dynamic server component at
+`/dashboard` that renders exactly **five swimlanes** every time the exec opens it.
+
+### Lane definitions
+
+| # | Lane name | Source | Filter |
+|---|---|---|---|
+| 1 | **Prospects to follow up** | `crm.contact` | `triage_tag IN ('can_help_them', 'can_help_me', 'pilot_candidate')` AND last `call_note.occurred_at > 7 days ago` (or no notes) AND `sensitive_flag IS NULL` |
+| 2 | **Inbox progress** | `crm.draft` (count) + Gmail unread stub | `draft.status = 'pending'`; Gmail unread is `null` until Stream A lands `getGmailUnreadCount()`. |
+| 3 | **Admin (vendors / contractors)** | `pm.task` | `work_area = 'admin'` AND `status != 'done'` |
+| 4 | **Thought leadership** | `pm.task` | `work_area = 'thought_leadership'` AND `status != 'done'` |
+| 5 | **Product roadmap** | `pm.task` joined `pm.project` | `work_area NOT IN ('admin', 'thought_leadership')` AND `project.project_type IN ('hire', 'deal', 'okr', 'other')` AND `status != 'done'` |
+
+All task lanes show at most **5 items**.
+
+### Tie-break ordering (within each task lane)
+
+```
+1. is_pinned DESC          — pinned items always at top (US-004)
+2. IMPACT order:           both=1, revenue=2, reputation=3, neither=4, null=5
+3. priority ASC            — lower number = higher priority
+4. due_date ASC NULLS LAST — soonest due date first
+```
+
+Pinning survives across calendar weeks and is never auto-cleared (US-004).
+
+### Empty-lane handling
+
+Each empty lane renders a one-line prompt explaining what would populate it.
+The `getDashboardLanes()` function always returns arrays; the page component owns the empty-state UI.
+
+### Cross-cutting invariant #6
+
+> The Monday "What matters this week" view contains exactly the five swimlanes
+> the exec named — not four, not six. (user-stories.md invariant #6, US-017)
+
+Enforced by: `apps/web/__tests__/dashboard.test.ts` (lane-count regression test).
+
+### Stream M placeholder
+
+`<div id="do-this-first" />` above the swimlanes is reserved for Stream M's
+"Do this first" counterfactual card (US-024, SY-013). Stream M edits
+`apps/web/app/dashboard/page.tsx` to fill that stub.
+
+### Data layer
+
+`apps/web/lib/dashboard.ts` exports `getDashboardLanes(session): Promise<DashboardLanes>`.
+- All queries go through `query()` so RLS applies.
+- No LLM calls — pure SQL + in-memory ordering.
+- Returns `{ prospects, inbox, admin, thoughtLeadership, productRoadmap }` — always exactly 5 keys.
+
+---
+
 ## PR3 task ergonomics — new columns (K1-K4)
 
 Four columns added in `PR3-K` that downstream streams depend on.
