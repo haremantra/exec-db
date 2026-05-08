@@ -178,10 +178,40 @@ The above plus: change management on `packages/db` migrations (PR + review + aud
 `audit.llm_call` is **append-only** and retained for **365 days minimum**.
 
 - No `UPDATE` or `DELETE` RLS policies exist on `audit.llm_call`. The table is INSERT-only from the application layer.
-- A delete-prevention `RULE` (`llm_call_no_delete`) and an update-prevention `RULE` (`llm_call_no_update`) are installed in `packages/db/src/rls/policies.sql`. Any attempt to `DELETE` or `UPDATE` rows raises a division-by-zero exception, preventing the operation at the database level even for superusers who bypass RLS.
+- A `BEFORE UPDATE OR DELETE` trigger (`llm_call_no_mutate`) in `packages/db/src/rls/policies.sql` fires before any mutation reaches storage and raises: `audit.llm_call is append-only (PR2 SY-017/AD-005)`. This replaces the previous `DO INSTEAD (SELECT 1/0)` rules which were replaced in PR2-J for clarity (Copilot review on PR #19).
 - `app_exec` can SELECT all rows. `app_function_lead` and `app_assistant` can SELECT all rows (TODO stream C: tighten to exclude sensitive contacts once `crm.contact.sensitive_flag` lands).
 - INSERT is restricted to `app_exec`; `recordLlmCall()` always runs under a synthetic exec-tier session for this reason.
 - The secondary Google Sheet (SY-017) is a human-readable export tier. The Postgres table is the authoritative source of truth. Sheet failures are logged but never propagate to the caller.
+
+## Full-text search exclusion (I2 — US-008)
+
+The `/crm/search` page and the `searchCallNotes()` helper in `apps/web/lib/note-search.ts`
+enforce sensitive-contact exclusion at **two independent layers**:
+
+1. **RLS (database layer):** The existing `crm.is_sensitive_for_role()` function hides
+   sensitive-contact rows from any non-`exec_all` database role before the query result
+   reaches the application.  This is the primary enforcement mechanism added in PR2-C.
+
+2. **Application layer (double-fence):** `searchCallNotes()` independently adds a
+   `WHERE crm.contact.sensitive_flag IS NULL` condition to every query for non-`exec_all`
+   callers.  This ensures that even if the RLS policy were bypassed or misconfigured,
+   sensitive notes would still be excluded.
+
+### Sensitive-search toggle behaviour
+
+| Caller tier | `includeSensitive` option | Sensitive contacts in results? |
+|---|---|---|
+| `exec_all` | `false` (default) | No |
+| `exec_all` | `true` | Yes |
+| Any non-exec tier | `true` (set by caller) | No — option is **silently ignored** |
+| Any non-exec tier | `false` | No |
+
+The "silently ignored" behaviour is intentional: a non-exec caller passing `includeSensitive=true`
+gets the same result as `includeSensitive=false`, with no error raised.  The front-end
+checkbox is only rendered for `exec_all` sessions, so this case should not arise in
+normal use; the guard exists for defence-in-depth against direct API or programmatic calls.
+
+This invariant is proven by `apps/web/__tests__/note-search.test.ts` (runs on every push).
 
 ## `app_assistant` role (AD-002)
 
