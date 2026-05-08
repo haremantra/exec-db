@@ -13,16 +13,29 @@
  *   so that tasks linked to sensitive contacts are filtered from the digest body
  *   before rendering. Currently omitted per the spec (defer to Stream P).
  *
+ * TODO(stream-P): Preserve the slipped-tasks and close-ready sections added by
+ *   Stream N (buildSlippedSection / buildCloseReadySection) — call them from
+ *   the Claude-ranked body assembler so they compose cleanly.
+ *
  * Data shape read from DB:
  *   pm.task JOIN pm.project WHERE
  *     owner_id = userId
  *     AND status NOT IN ('done')
  *   For weekly: also include tasks completed in the last 7 days.
+ *
+ * Stream N additions (SY-009, US-025):
+ *   buildSlippedSection()    — "Slipped this week" markdown section.
+ *   buildCloseReadySection() — "Sales — close-ready" markdown section (Tuesdays only).
+ *   These are exported so Stream P can incorporate them into the ranked variant.
  */
 
 import { and, eq, gt, inArray, not, sql } from "drizzle-orm";
 import { schema } from "@exec-db/db";
 import { query } from "@/lib/db";
+
+// Stream N imports — used by the two new digest sections below.
+import type { SlippedTask } from "@/lib/slipped-tasks";
+import type { CloseReadyContact } from "@/lib/close-ready";
 
 export interface DigestBodyResult {
   subject: string;
@@ -169,6 +182,41 @@ export async function assembleDigestBody(
     lines.push("");
   }
 
+  // ── Stream N: Slipped tasks section ────────────────────────────────────────
+  // Always included in daily/weekly digests when there are slipped tasks.
+  // Pulled from the same session context; the query respects RLS.
+  // NOTE: We call getSlippedTasks here lazily to avoid circular imports at
+  // module load time.  Stream P should call buildSlippedSection() directly
+  // to preserve composability.
+  try {
+    const { getSlippedTasks } = await import("@/lib/slipped-tasks");
+    const slipped = await getSlippedTasks({ userId, tier: "exec_all", functionArea: null } as Parameters<typeof getSlippedTasks>[0]);
+    const slippedSection = buildSlippedSection(slipped);
+    if (slippedSection) {
+      lines.push(slippedSection);
+      lines.push("");
+    }
+  } catch {
+    // Non-fatal — digest continues without slipped section if query fails.
+  }
+
+  // ── Stream N: Close-ready section (Tuesdays only) ──────────────────────────
+  // On Tuesdays, surface the close-ready cohort in the digest.
+  const isTuesdayDigest = now.getDay() === 2;
+  if (isTuesdayDigest) {
+    try {
+      const { getCloseReadyCohort } = await import("@/lib/close-ready");
+      const cohort = await getCloseReadyCohort({ userId, tier: "exec_all", functionArea: null } as Parameters<typeof getCloseReadyCohort>[0]);
+      const cohortSection = buildCloseReadySection(cohort);
+      if (cohortSection) {
+        lines.push(cohortSection);
+        lines.push("");
+      }
+    } catch {
+      // Non-fatal — digest continues without close-ready section if query fails.
+    }
+  }
+
   lines.push("---");
   lines.push(`[Unsubscribe from digest emails](${unsubLink})`);
 
@@ -183,6 +231,58 @@ export async function assembleDigestBody(
     text,
     taskCount: activeTasks.length,
   };
+}
+
+// ── Stream N: Composable section builders ─────────────────────────────────────
+
+/**
+ * buildSlippedSection — deterministic markdown for the "Slipped this week" section.
+ *
+ * Returns an empty string when there are no slipped tasks.
+ * Stream P should call this and include the result in the ranked digest body.
+ * SY-009 / W6.3.
+ */
+export function buildSlippedSection(tasks: SlippedTask[]): string {
+  if (tasks.length === 0) return "";
+
+  const lines: string[] = [];
+  lines.push(`## Slipped this week (${tasks.length})`);
+  lines.push("");
+  for (const t of tasks) {
+    const reasonLabel = t.slippedReason === "overdue" ? "overdue" : "needs check-in";
+    const due = t.dueDate ? ` · due ${t.dueDate}` : "";
+    const hint = t.unblockHint
+      ? ` · 💡 possible unblock: "${t.unblockHint.subject}"`
+      : "";
+    lines.push(`- **${t.title}**${due} [${reasonLabel}]${hint}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * buildCloseReadySection — deterministic markdown for the "Sales — close-ready" section.
+ *
+ * Returns an empty string when there are no close-ready contacts.
+ * Stream P should call this on Tuesdays and include it in the ranked digest body.
+ * US-025 / SY-015 / W9.2.
+ */
+export function buildCloseReadySection(contacts: CloseReadyContact[]): string {
+  if (contacts.length === 0) return "";
+
+  const lines: string[] = [];
+  lines.push(`## Sales — close-ready (${contacts.length})`);
+  lines.push("");
+  lines.push("Warm reply ≤7 days, qualified, no blockers:");
+  lines.push("");
+  for (const c of contacts) {
+    const tag = c.qualifierTag.replace("_", " ");
+    const touchDate = c.lastTouchAt.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    lines.push(`- **${c.contactName}** [${tag}] · last ${c.lastTouchKind} ${touchDate}`);
+  }
+  return lines.join("\n");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

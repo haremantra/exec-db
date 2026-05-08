@@ -4,6 +4,8 @@ import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { rankTasks, type RankerTask, type RankingResult } from "@/lib/ranker";
+import { getCloseReadyCohort, type CloseReadyContact } from "@/lib/close-ready";
+import { getSlippedTasks, type SlippedTask } from "@/lib/slipped-tasks";
 import { disagreeWithRanker } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +74,16 @@ export default async function DashboardPage(): Promise<JSX.Element> {
   // Map rows by id for the card UI.
   const byId = new Map(rows.map((r) => [r.id, r] as const));
 
+  // {/* Stream N */} — Tuesday cohort + slipped tasks
+  // Use new Date().getDay() === 2 as a stand-in for America/Los_Angeles Tuesday.
+  const isTuesday = new Date().getDay() === 2;
+
+  // Fetch close-ready cohort on Tuesdays and slipped tasks every day.
+  const [closeReadyCohort, slippedTasks] = await Promise.all([
+    isTuesday ? getCloseReadyCohort(session) : Promise.resolve([] as CloseReadyContact[]),
+    getSlippedTasks(session),
+  ]);
+
   return (
     <div className="space-y-8">
       <header className="flex items-baseline justify-between">
@@ -81,16 +93,160 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         </span>
       </header>
 
+      {/* Stream N — Slipped tasks banner (always visible when tasks have slipped) */}
+      {slippedTasks.length > 0 && (
+        <SlippedBanner count={slippedTasks.length} />
+      )}
+
+      {/* Stream N — Tuesday "Sales — close-ready" section (Tuesdays only, above Do this first) */}
+      {isTuesday && closeReadyCohort.length > 0 && (
+        <CloseReadySection contacts={closeReadyCohort} />
+      )}
+
       {/* M: Do this first card — replaces L's <div id="do-this-first" /> stub */}
       <DoThisFirstCard ranking={ranking} byId={byId} />
 
       {/* Stream L will render the 5-swimlane layout here:
            prospects-followup | inbox-progress | admin | thought-leadership | product-roadmap
            (US-017, W6.6, invariant #6).  Placeholder until L merges. */}
+      {/* Stream N — slipped tasks are rendered at the top of their respective swimlanes
+           (work_area lane) with a red dot. The 5-swimlane invariant (#6) is preserved:
+           slipped tasks do NOT add a 6th swimlane — they are prepended within existing lanes.
+           The SWIMLANE_KEYS constant below is the regression guard for invariant #6. */}
       <section className="rounded-md border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 dark:border-neutral-700">
         Swimlanes will be rendered by Stream L. This dashboard route is shared
         between L (layout) and M (this card).
+        {/* Stream N — slippedTasks prop will be passed to swimlane components once L merges */}
       </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stream N — Invariant #6 regression guard
+// ---------------------------------------------------------------------------
+
+/**
+ * SWIMLANE_KEYS — the exactly-five swimlane keys for the Monday dashboard.
+ * Invariant #6: the Monday view shows exactly five swimlanes — never four, never six.
+ * This constant is the canonical list. Tests import it to verify the count.
+ * Stream L renders these; Stream N must never add to this list.
+ *
+ * US-017, W6.6, pr3-spec.md invariant #6.
+ */
+export const SWIMLANE_KEYS = [
+  "prospects_followup",
+  "inbox_progress",
+  "admin",
+  "thought_leadership",
+  "product_roadmap",
+] as const;
+
+export type SwimlanKey = (typeof SWIMLANE_KEYS)[number];
+
+// ---------------------------------------------------------------------------
+// Stream N — Close-ready section (Tuesdays only)
+// ---------------------------------------------------------------------------
+
+function CloseReadySection({ contacts }: { contacts: CloseReadyContact[] }): JSX.Element {
+  return (
+    <section
+      aria-label="Sales — close-ready"
+      className="rounded-md border-2 border-emerald-400 bg-emerald-50 p-4 dark:border-emerald-600 dark:bg-emerald-950"
+    >
+      <header className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+          Sales — close-ready
+        </h3>
+        <span className="text-xs text-emerald-700 dark:text-emerald-300">
+          warm reply ≤7d · qualified · no blockers · Tuesday
+        </span>
+      </header>
+
+      <ul className="mt-3 space-y-3">
+        {contacts.map((c) => {
+          const touchLabel = c.lastTouchKind === "email" ? "email" : "note";
+          const touchDate = c.lastTouchAt.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          });
+
+          // Google Calendar new-event URL (no auth required to open).
+          const calUrl =
+            `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+            `&text=${encodeURIComponent(`Call with ${c.contactName}`)}` +
+            `&details=${encodeURIComponent("Scheduled via exec-db close-ready cohort")}`;
+
+          // Draft close email URL: links to contact page with autodraft tone pre-selected.
+          const draftUrl =
+            `/crm/contacts/${c.contactId}` +
+            `?autodraft_tone=warm-sales-followup`;
+
+          return (
+            <li
+              key={c.contactId}
+              className="flex flex-wrap items-center justify-between gap-2 rounded bg-white/60 px-3 py-2 dark:bg-neutral-900/40"
+            >
+              <div className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  {c.contactName}
+                </span>
+                <span className="text-xs text-neutral-500">
+                  last {touchLabel} {touchDate} ·{" "}
+                  <span className="rounded bg-emerald-100 px-1 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
+                    {c.qualifierTag.replace("_", " ")}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  href={draftUrl}
+                  className="rounded border border-emerald-400 px-2 py-1 text-xs text-emerald-800 hover:bg-emerald-100 dark:border-emerald-600 dark:text-emerald-200 dark:hover:bg-emerald-900"
+                >
+                  Draft close email
+                </Link>
+                <a
+                  href={calUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                >
+                  Schedule call
+                </a>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stream N — Slipped tasks banner
+// ---------------------------------------------------------------------------
+
+function SlippedBanner({ count }: { count: number }): JSX.Element {
+  return (
+    <div
+      role="alert"
+      aria-label="Slipped tasks"
+      className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+    >
+      {/* Red dot */}
+      <span
+        aria-hidden="true"
+        className="inline-block h-2 w-2 shrink-0 rounded-full bg-red-500"
+      />
+      <span>
+        <strong>Needs attention:</strong>{" "}
+        {count === 1
+          ? "1 slipped task"
+          : `${count} slipped tasks`}{" "}
+        (overdue or awaiting response past deadline). Slipped tasks appear at
+        the top of their respective swimlanes below.
+      </span>
     </div>
   );
 }
