@@ -281,13 +281,83 @@ and `0 15 * * 0` if 7 am year-round delivery is required (S5.8: single fixed TZ)
 | Cron auth | Bearer `${CRON_SECRET}` header required; 401 on mismatch |
 | Digest record | `pm.digest_send` row inserted on every successful delivery |
 
-### Stream P handoff
+### Stream P — Digest content (Claude-ranked) + cadence alerts
 
-`apps/web/lib/digest-body.ts:assembleDigestBody()` is a deterministic stub.
-Stream P will replace it with a Claude-ranked version that:
-- Weights tasks by revenue + reputation impact (S5.5 / S5.6 overrides).
-- Produces counterfactual rationale ("here's what was deprioritized and why", US-024 / SY-013).
-- Excludes tasks linked to sensitive contacts via `getContactContext`-style retrieval.
+`apps/web/lib/digest-body.ts:assembleDigestBody()` now produces a Claude-ranked body (PR3-P).
+
+#### Digest body sections
+
+| Order | Section | Spec |
+|---|---|---|
+| 1 | **Top priorities today/this week** | Top pick + up to 2 alternatives from `rankTasks()`, each with a 1-sentence reason. |
+| 2 | **What I deprioritized and why** | All alternatives returned by the ranker, each with a deprioritization reason (invariant #7). |
+| 3 | **Other items** | Remaining active tasks in deterministic order (not in the top-3 picks). |
+| 4 | **Cadence** | Contact categories below expected touch frequency (SY-002). Only rendered when ≥1 category is short. |
+| [N] | Slipped / Close-ready | Reserved for Stream N. Placeholder comments mark the composition boundary. |
+| 5 | **Completed this week** | Weekly cadence only. Tasks completed in the last 7 days. |
+
+#### Ranking data flow
+
+```
+assembleDigestBody(userId, cadence, unsubToken, session?)
+  │
+  ├─ SELECT pm.task JOIN pm.project WHERE owner_id = userId  (exec_all tier)
+  │   RLS already excludes sensitive-flagged contacts (invariant #5, policies.sql)
+  │
+  ├─ rankTasks(activeTasks, session)        [apps/web/lib/ranker.ts — Stream M]
+  │   └─ Single Opus call per digest; returns topPick + ≤3 alternatives with
+  │      counterfactual deprioritization reasons (invariant #7).
+  │      Falls back to deterministicRank() on LLM error (no digest crash).
+  │
+  ├─ getCadenceAlerts(session)             [apps/web/lib/cadence-alert.ts — Stream P]
+  │   ├─ SELECT crm.contact WHERE owner = userId → infer category per heuristic
+  │   ├─ Count touches (call_note + email_thread) per category in window
+  │   └─ Return [{category, expectedPerWindow, actualCount, windowDays}] for below-target
+  │
+  └─ Render markdown + HTML body with all sections
+```
+
+#### Cadence alert heuristic (no explicit category column yet)
+
+Contact category is inferred from existing fields in priority order:
+
+| Priority | Field | Maps to |
+|---|---|---|
+| 1 | `sensitive_flag` IN (`vc_outreach`, `partnership`) | investor |
+| 1 | `sensitive_flag` = `rolled_off_customer` | customer |
+| 1 | `sensitive_flag` = `irrelevant_vendor` | contractor |
+| 2 | `triage_tag` IN (`pilot_candidate`, `can_help_me`) | prospect |
+| 3 | `work_area` | direct category match |
+
+Expected cadences per W2.1:
+
+| Category | Expected touches | Window |
+|---|---|---|
+| investor | ≥1 | 7 days |
+| customer | ≥3 | 7 days |
+| prospect | ≥1 | **14 days** (biweekly) |
+| contractor | ≥3 | 7 days |
+| board | ≥1 | 7 days |
+
+TODO: Replace heuristic when a `category` column is added to `crm.contact`.
+
+#### Key invariants (Stream P)
+
+| Invariant | Enforced by | Test |
+|---|---|---|
+| Every top pick carries a counterfactual (invariant #7) | `rankTasks()` returns `alternatives[]` with `deprioritizationReason`; digest always renders "What I deprioritized" section when alternatives are present. | `digest-content.test.ts` TEST-P2 |
+| Ranker called exactly once per digest | `assembleDigestBody` calls `rankTasks` once before building sections | `digest-content.test.ts` TEST-P3 |
+| Cadence section only when alerts exist | Section rendered conditionally (`alerts.length > 0`) | `digest-content.test.ts` TEST-P8 |
+| Prospect window = 14 days | `CATEGORY_CONFIG.prospect.windowDays = 14` | `digest-content.test.ts` TEST-P12 |
+| Sensitive contacts excluded | RLS on `crm.contact` via `exec_all` session; comment in `digest-body.ts` | `assistant-grant.test.ts` (existing) |
+
+#### Files
+
+| File | Owner | Purpose |
+|---|---|---|
+| `apps/web/lib/digest-body.ts` | P | Ranked digest body assembler; imports `rankTasks` + `getCadenceAlerts` |
+| `apps/web/lib/cadence-alert.ts` | P | `getCadenceAlerts(session)` → per-category alerts; `inferContactCategory()` heuristic |
+| `apps/web/__tests__/digest-content.test.ts` | P | 14 tests; invariant #7 regression guard at TEST-P2 |
 
 ## Autodraft (Stream B — PR2-B)
 
