@@ -295,3 +295,49 @@ DROP POLICY IF EXISTS digest_send_write ON pm.digest_send;
 CREATE POLICY digest_send_write ON pm.digest_send FOR ALL
   USING (app.current_tier() = 'exec_all')
   WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ============================================================================
+-- audit.llm_call (SY-017, AD-005)
+--
+-- Append-only. No UPDATE or DELETE policies. A delete-prevention RULE/trigger
+-- (below) enforces this at the DB level per AD-005 (365-day retention).
+--
+-- INSERT:  app_exec only (audit writes always run as app_exec per recordLlmCall).
+-- SELECT:  app_exec can read all rows.
+--          app_function_lead + app_assistant can read all rows.
+--          TODO(stream C): tighten function_lead + assistant SELECT to exclude
+--          rows whose contact_id resolves to a sensitive contact once
+--          crm.contact.sensitive_flag is added by stream C.
+-- ============================================================================
+
+ALTER TABLE audit.llm_call ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.llm_call FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS llm_call_exec_read ON audit.llm_call;
+CREATE POLICY llm_call_exec_read ON audit.llm_call FOR SELECT
+  USING (app.current_tier() = 'exec_all');
+
+-- function_lead and app_assistant may read all rows for now.
+-- TODO(stream C): join to crm.contact and exclude sensitive contacts.
+DROP POLICY IF EXISTS llm_call_lead_read ON audit.llm_call;
+CREATE POLICY llm_call_lead_read ON audit.llm_call FOR SELECT
+  USING (app.current_tier() IN ('function_lead', 'assistant'));
+
+DROP POLICY IF EXISTS llm_call_insert ON audit.llm_call;
+CREATE POLICY llm_call_insert ON audit.llm_call FOR INSERT
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- Delete-prevention rule — raises an exception if DELETE is attempted.
+-- This enforces AD-005 (365-day minimum retention) at the DB level.
+DROP RULE IF EXISTS llm_call_no_delete ON audit.llm_call;
+CREATE RULE llm_call_no_delete AS ON DELETE TO audit.llm_call
+  DO INSTEAD (
+    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); DELETE is prohibited') AS _blocked
+  );
+
+-- Update-prevention rule — raises an exception if UPDATE is attempted.
+DROP RULE IF EXISTS llm_call_no_update ON audit.llm_call;
+CREATE RULE llm_call_no_update AS ON UPDATE TO audit.llm_call
+  DO INSTEAD (
+    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); UPDATE is prohibited') AS _blocked
+  );
