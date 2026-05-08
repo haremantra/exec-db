@@ -67,6 +67,28 @@ export const contact = crm.table(
      * separately in packages/db/src/rls/policies.sql (see migration note).
      */
     sensitiveFlag: varchar("sensitive_flag", { length: 32 }),
+    /**
+     * Draft flag (G1/G4 — US-005, SY-001).
+     * true  → contact was auto-created from a LinkedIn URL or email intake
+     *         and awaits exec confirmation ("needs review").
+     * false → exec-confirmed; never overwritten by auto-create logic.
+     *
+     * Schema choice: single boolean column on crm.contact rather than a
+     * separate crm.contact_draft table.  Rationale: draft contacts share
+     * all the same fields as confirmed contacts (name, email, company,
+     * title) so a second table would duplicate the schema; the only
+     * difference is the confirmation state.  A boolean column is simpler,
+     * keeps all queries against one table, and is trivially dropped later
+     * if a richer workflow state machine is needed.
+     *
+     * Migration SQL:
+     *   ALTER TABLE crm.contact ADD COLUMN is_draft boolean NOT NULL DEFAULT false;
+     * Existing rows (all exec-confirmed) default to false — no backfill needed.
+     * Drafts inherit the existing RLS visibility rules; no new policies required
+     * since the exec (exec_all tier) already has full SELECT/INSERT/UPDATE/DELETE
+     * on crm.contact.
+     */
+    isDraft: boolean("is_draft").notNull().default(false),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
