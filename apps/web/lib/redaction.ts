@@ -44,6 +44,21 @@ export type RedactionClass =
   | "drivers_license"
   | "non_public_address";
 
+/**
+ * Canonical declaration order for {@link RedactionClass}. Used everywhere
+ * that needs a stable ordering of `classesHit` / `redactionsApplied`.
+ * Importers (e.g. `safeAnthropic`) MUST reuse this rather than redeclare
+ * the order — divergence would silently break the stability guarantee.
+ */
+export const REDACTION_CLASS_ORDER: readonly RedactionClass[] = [
+  "phi",
+  "pi",
+  "banking",
+  "ssn",
+  "drivers_license",
+  "non_public_address",
+];
+
 export interface RedactionResult {
   redacted: string;
   classesHit: RedactionClass[];
@@ -78,8 +93,10 @@ function publicDomains(): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Luhn validator — used for credit card and ABA routing checks to cut down on
-// false positives from bare 9- or 16-digit runs.
+// Luhn validator — used for credit card checks (Luhn mod-10).
+// ABA routing uses a different mod-10 weighting (see `abaValid` below); the
+// two are independent algorithms despite both producing 9–19 digit runs.
+// Keeping them separate cuts down false positives from bare digit sequences.
 // ---------------------------------------------------------------------------
 
 function luhnValid(digits: string): boolean {
@@ -140,10 +157,11 @@ function simpleReplace(
   return { output, hit };
 }
 
-// SSN: 3-2-4 with - or space separator. Reject 000-/666-/9xx- per SSA rules
-// to cut down false positives on lookalike numerics like "100-20-3000" being
-// a product code (we DO match that — strict SSA filtering would over-trim;
-// the rule of thumb here is "if it looks like an SSN, mask it").
+// SSN: any 3-2-4 sequence with `-` or space separators. We deliberately do
+// NOT enforce SSA-issuance rules (e.g. exclude 000-/666-/9xx- area numbers).
+// Strict SSA filtering would let through plausible-looking IDs that happen to
+// be valid SSNs as side effects of those rules; the cost of leaking an SSN
+// is higher than the cost of masking a 3-2-4 product code that resembles one.
 const RE_SSN = /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/g;
 
 // US passport: a 9-digit run preceded by an explicit "passport" keyword to
@@ -335,15 +353,6 @@ export function redact(input: string): RedactionResult {
 
   let current = input;
   const seen = new Set<RedactionClass>();
-  // Maintain declaration-order of the union for stable output.
-  const order: RedactionClass[] = [
-    "phi",
-    "pi",
-    "banking",
-    "ssn",
-    "drivers_license",
-    "non_public_address",
-  ];
 
   for (const p of PATTERNS) {
     const { output, hit } = p.apply(current);
@@ -351,6 +360,6 @@ export function redact(input: string): RedactionResult {
     if (hit) seen.add(p.class);
   }
 
-  const classesHit = order.filter((c) => seen.has(c));
+  const classesHit = REDACTION_CLASS_ORDER.filter((c) => seen.has(c));
   return { redacted: current, classesHit };
 }

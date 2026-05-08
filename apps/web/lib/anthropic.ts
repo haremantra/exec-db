@@ -18,7 +18,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { redact, type RedactionClass } from "./redaction";
+import { REDACTION_CLASS_ORDER, redact, type RedactionClass } from "./redaction";
 
 const MODEL_IDS = {
   opus: "claude-opus-4-7",
@@ -71,20 +71,12 @@ export async function safeAnthropic(
   const promptScrub = redact(opts.prompt);
   const systemScrub = opts.system ? redact(opts.system) : null;
 
-  // Combine class hits from prompt + system into a unique, ordered set.
-  const order: RedactionClass[] = [
-    "phi",
-    "pi",
-    "banking",
-    "ssn",
-    "drivers_license",
-    "non_public_address",
-  ];
+  // Combine class hits from prompt + system into a unique, stable-ordered set.
   const seen = new Set<RedactionClass>([
     ...promptScrub.classesHit,
     ...(systemScrub?.classesHit ?? []),
   ]);
-  const redactionsApplied = order.filter((c) => seen.has(c));
+  const redactionsApplied = REDACTION_CLASS_ORDER.filter((c) => seen.has(c));
 
   // TODO(stream E): record to audit.llm_call here with
   //   { model, prompt_class, redacted_input_hash, response_hash, tokens, costUsd }
@@ -108,11 +100,17 @@ export async function safeAnthropic(
 // Streaming-flavored variant. The vision-check script needs token streaming
 // + finalMessage access, which the simple `safeAnthropic` does not surface.
 // We keep redaction enforced at the entry point and hand the stream back.
+//
+// Note on `cacheable`: Anthropic prompt caching is opted into per content
+// block by setting `cache_control: { type: "ephemeral" }` (the "ephemeral"
+// label refers to the ~5-minute cache TTL — it ENABLES caching, it does not
+// disable it). We expose this as a `cacheable: boolean` so the field name
+// matches its effect rather than the SDK's internal vocabulary.
 
 export interface SafeAnthropicStreamOptions {
   model: SafeAnthropicModel;
-  system: { text: string; cache?: boolean };
-  messages: Array<{ role: "user" | "assistant"; text: string; cache?: boolean }>;
+  system: { text: string; cacheable?: boolean };
+  messages: Array<{ role: "user" | "assistant"; text: string; cacheable?: boolean }>;
   maxTokens?: number;
 }
 
@@ -147,7 +145,7 @@ export function safeAnthropicStream(
         {
           type: "text",
           text: r.redacted,
-          ...(m.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+          ...(m.cacheable ? { cache_control: { type: "ephemeral" as const } } : {}),
         },
       ],
     };
@@ -162,19 +160,16 @@ export function safeAnthropicStream(
       {
         type: "text",
         text: sysScrub.redacted,
-        ...(opts.system.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+        ...(opts.system.cacheable
+          ? { cache_control: { type: "ephemeral" as const } }
+          : {}),
       },
     ],
     messages: sdkMessages,
   });
 
-  const order: RedactionClass[] = [
-    "phi",
-    "pi",
-    "banking",
-    "ssn",
-    "drivers_license",
-    "non_public_address",
-  ];
-  return { stream, redactionsApplied: order.filter((c) => seen.has(c)) };
+  return {
+    stream,
+    redactionsApplied: REDACTION_CLASS_ORDER.filter((c) => seen.has(c)),
+  };
 }

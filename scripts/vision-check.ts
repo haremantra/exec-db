@@ -49,7 +49,7 @@ function extractVision(text: string): string | null {
 interface ConvoTurn {
   role: "user" | "assistant";
   text: string;
-  cache?: boolean;
+  cacheable?: boolean;
 }
 
 async function main(): Promise<void> {
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     turns.push({
       role: "user",
       text: `Current docs/vision.md:\n\n\`\`\`markdown\n${currentVision}\n\`\`\`\n\nOwner says: ${userTurn}`,
-      cache: true,
+      cacheable: true,
     });
 
     process.stdout.write("\n> ");
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     const { stream } = safeAnthropicStream({
       model: "opus",
       maxTokens: 8192,
-      system: { text: SYSTEM_PROMPT, cache: true },
+      system: { text: SYSTEM_PROMPT, cacheable: true },
       messages: turns,
     });
 
