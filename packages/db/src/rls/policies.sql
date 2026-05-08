@@ -351,6 +351,29 @@ DROP POLICY IF EXISTS oauth_token_exec_delete ON crm.oauth_token;
 CREATE POLICY oauth_token_exec_delete ON crm.oauth_token FOR DELETE
   USING (app.current_tier() = 'exec_all');
 
+-- ----- crm.user_pref -----
+-- Each user may read and update their own preferences row.
+-- app_exec (exec_all tier) reads all rows for the digest cron worker.
+-- INSERT is allowed by any authenticated user so they can opt in for the first time.
+ALTER TABLE crm.user_pref ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.user_pref FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS user_pref_self_select ON crm.user_pref;
+CREATE POLICY user_pref_self_select ON crm.user_pref FOR SELECT
+  USING (
+    crm.user_pref.user_id = app.current_user_id()
+    OR app.current_tier() = 'exec_all'
+  );
+
+DROP POLICY IF EXISTS user_pref_self_insert ON crm.user_pref;
+CREATE POLICY user_pref_self_insert ON crm.user_pref FOR INSERT
+  WITH CHECK (crm.user_pref.user_id = app.current_user_id());
+
+DROP POLICY IF EXISTS user_pref_self_update ON crm.user_pref;
+CREATE POLICY user_pref_self_update ON crm.user_pref FOR UPDATE
+  USING (crm.user_pref.user_id = app.current_user_id())
+  WITH CHECK (crm.user_pref.user_id = app.current_user_id());
+
 -- ----- pm.project -----
 ALTER TABLE pm.project ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pm.project FORCE ROW LEVEL SECURITY;
