@@ -13,12 +13,13 @@
 // it from the SDK package itself; that import is a clear signal in review
 // that they may be bypassing redaction.
 //
-// Audit logging (SY-017 / AD-005) is handled by stream E. A TODO marker
-// below shows where the call will land.
+// Audit logging (SY-017 / AD-005) is handled by stream E. The TODO markers
+// below have been replaced with actual recordLlmCall calls (PR2-E).
 
 import Anthropic from "@anthropic-ai/sdk";
 
 import { REDACTION_CLASS_ORDER, redact, type RedactionClass } from "./redaction";
+import { recordLlmCall } from "./audit-llm";
 
 const MODEL_IDS = {
   opus: "claude-opus-4-7",
@@ -38,6 +39,9 @@ export interface SafeAnthropicOptions {
   maxTokens?: number;
   // Optional system prompt. System prompts are also redacted.
   system?: string;
+  // Audit metadata — required by cross-cutting invariant #4 (SY-017).
+  promptClass?: string;
+  contactId?: string | null;
 }
 
 export interface SafeAnthropicResult {
@@ -58,6 +62,8 @@ function client(): Anthropic {
  * Determinism note: Anthropic API output is non-deterministic, but the
  * redaction step that gates it IS deterministic and unit-tested by
  * `redaction.test.ts`.
+ *
+ * Every call writes a row to audit.llm_call (SY-017, cross-cutting invariant #4).
  */
 export async function safeAnthropic(
   opts: SafeAnthropicOptions,
@@ -78,21 +84,50 @@ export async function safeAnthropic(
   ]);
   const redactionsApplied = REDACTION_CLASS_ORDER.filter((c) => seen.has(c));
 
-  // TODO(stream E): record to audit.llm_call here with
-  //   { model, prompt_class, redacted_input_hash, response_hash, tokens, costUsd }
-  // and append a row to the daily Google Sheet (SY-017, AD-005).
+  let message: Awaited<ReturnType<typeof client.prototype.messages.create>>;
+  try {
+    message = await client().messages.create({
+      model: MODEL_IDS[opts.model],
+      max_tokens: opts.maxTokens ?? 8192,
+      ...(systemScrub ? { system: systemScrub.redacted } : {}),
+      messages: [{ role: "user", content: promptScrub.redacted }],
+    });
+  } catch (err: unknown) {
+    // Record the failed call before re-throwing.
+    await recordLlmCall({
+      contactId: opts.contactId ?? null,
+      model: opts.model,
+      promptClass: opts.promptClass ?? "unknown",
+      redactedInput: promptScrub.redacted,
+      responseText: null,
+      redactionsApplied,
+      outcome: "error",
+    }).catch((auditErr: unknown) => {
+      console.error("[safeAnthropic] Failed to write audit row on error:", auditErr);
+    });
+    throw err;
+  }
 
-  const message = await client().messages.create({
-    model: MODEL_IDS[opts.model],
-    max_tokens: opts.maxTokens ?? 8192,
-    ...(systemScrub ? { system: systemScrub.redacted } : {}),
-    messages: [{ role: "user", content: promptScrub.redacted }],
-  });
-
-  const text = message.content
+  const text = (message.content as Anthropic.ContentBlock[])
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
+
+  const usage = message.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+
+  // Record the successful call to audit.llm_call (SY-017 / AD-005).
+  const auditParams: Parameters<typeof recordLlmCall>[0] = {
+    contactId: opts.contactId ?? null,
+    model: opts.model,
+    promptClass: opts.promptClass ?? "unknown",
+    redactedInput: promptScrub.redacted,
+    responseText: text,
+    redactionsApplied,
+    outcome: "ok",
+  };
+  if (usage?.input_tokens != null) auditParams.inputTokens = usage.input_tokens;
+  if (usage?.output_tokens != null) auditParams.outputTokens = usage.output_tokens;
+  await recordLlmCall(auditParams);
 
   return { text, redactionsApplied };
 }
@@ -112,6 +147,9 @@ export interface SafeAnthropicStreamOptions {
   system: { text: string; cacheable?: boolean };
   messages: Array<{ role: "user" | "assistant"; text: string; cacheable?: boolean }>;
   maxTokens?: number;
+  // Audit metadata — required by cross-cutting invariant #4 (SY-017).
+  promptClass?: string;
+  contactId?: string | null;
 }
 
 export interface SafeAnthropicStreamHandle {
@@ -123,6 +161,12 @@ export interface SafeAnthropicStreamHandle {
  * Streaming variant. All `text` fields (system + every message) are
  * redacted before being passed to the SDK. Returns the underlying stream
  * plus the union of redaction classes that fired across all inputs.
+ *
+ * Audit logging: the stream object is wrapped so that when the terminal
+ * `finalMessage` event fires the audit row is written automatically.
+ * Callers continue to consume the stream exactly as before — no API change.
+ *
+ * Every call writes a row to audit.llm_call (SY-017, cross-cutting invariant #4).
  */
 export function safeAnthropicStream(
   opts: SafeAnthropicStreamOptions,
@@ -136,9 +180,13 @@ export function safeAnthropicStream(
   const sysScrub = redact(opts.system.text);
   const seen = new Set<RedactionClass>(sysScrub.classesHit);
 
+  // Concatenate all message texts for the input hash (stable, order-preserved).
+  let concatenatedInput = sysScrub.redacted;
+
   const sdkMessages: Anthropic.MessageParam[] = opts.messages.map((m) => {
     const r = redact(m.text);
     for (const c of r.classesHit) seen.add(c);
+    concatenatedInput += "\n" + r.redacted;
     return {
       role: m.role,
       content: [
@@ -151,9 +199,13 @@ export function safeAnthropicStream(
     };
   });
 
-  // TODO(stream E): record to audit.llm_call after stream completion.
+  const redactionsApplied = REDACTION_CLASS_ORDER.filter((c) => seen.has(c));
+  const redactedInput = concatenatedInput;
+  const contactId = opts.contactId ?? null;
+  const model = opts.model;
+  const promptClass = opts.promptClass ?? "unknown";
 
-  const stream = client().messages.stream({
+  const rawStream = client().messages.stream({
     model: MODEL_IDS[opts.model],
     max_tokens: opts.maxTokens ?? 8192,
     system: [
@@ -168,8 +220,49 @@ export function safeAnthropicStream(
     messages: sdkMessages,
   });
 
+  // Wire audit on stream terminal events.
+  // `finalMessage` fires once when the stream is fully consumed (success path).
+  rawStream.on("finalMessage", (msg: Anthropic.Message) => {
+    const text = (msg.content as Anthropic.ContentBlock[])
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    const usage = msg.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    const streamAuditParams: Parameters<typeof recordLlmCall>[0] = {
+      contactId,
+      model,
+      promptClass,
+      redactedInput,
+      responseText: text,
+      redactionsApplied,
+      outcome: "ok",
+    };
+    if (usage?.input_tokens != null) streamAuditParams.inputTokens = usage.input_tokens;
+    if (usage?.output_tokens != null) streamAuditParams.outputTokens = usage.output_tokens;
+    recordLlmCall(streamAuditParams).catch((err: unknown) => {
+      console.error("[safeAnthropicStream] Failed to write audit row:", err);
+    });
+  });
+
+  // `error` fires if the stream aborts before finalMessage.
+  rawStream.on("error", (err: Error) => {
+    recordLlmCall({
+      contactId,
+      model,
+      promptClass,
+      redactedInput,
+      responseText: null,
+      redactionsApplied,
+      outcome: "error",
+    }).catch((auditErr: unknown) => {
+      console.error("[safeAnthropicStream] Failed to write error audit row:", auditErr);
+    });
+    // The error is re-emitted by the stream itself; we don't swallow it.
+    void err;
+  });
+
   return {
-    stream,
-    redactionsApplied: REDACTION_CLASS_ORDER.filter((c) => seen.has(c)),
+    stream: rawStream,
+    redactionsApplied,
   };
 }

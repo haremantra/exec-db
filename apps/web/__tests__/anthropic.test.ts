@@ -20,6 +20,7 @@ vi.mock("@anthropic-ai/sdk", () => {
         captured.push({ method: "create", args });
         return {
           content: [{ type: "text", text: "mock response" }],
+          usage: { input_tokens: 0, output_tokens: 0 },
         };
       }),
       stream: vi.fn((args: unknown) => {
@@ -36,6 +37,12 @@ vi.mock("@anthropic-ai/sdk", () => {
   }));
   return { default: Mock };
 });
+
+// Stub the audit-log writer so wrapper tests don't try to hit Postgres.
+// Stream E's audit-llm tests (mocked at @/lib/db) cover the real path.
+vi.mock("@/lib/audit-llm", () => ({
+  recordLlmCall: vi.fn(async () => undefined),
+}));
 
 beforeEach(() => {
   captured.length = 0;

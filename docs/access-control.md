@@ -107,3 +107,24 @@ The invariant is proven by `apps/web/__tests__/cross-pollination.test.ts` (10 te
 ## SOC 2 alignment
 
 The above plus: change management on `packages/db` migrations (PR + review + audit), backup PITR with monthly restore drill, and a sub-processor list checked into `docs/`. Cheap to do from day one; expensive to retrofit.
+
+## LLM audit log retention (AD-005)
+
+`audit.llm_call` is **append-only** and retained for **365 days minimum**.
+
+- No `UPDATE` or `DELETE` RLS policies exist on `audit.llm_call`. The table is INSERT-only from the application layer.
+- A delete-prevention `RULE` (`llm_call_no_delete`) and an update-prevention `RULE` (`llm_call_no_update`) are installed in `packages/db/src/rls/policies.sql`. Any attempt to `DELETE` or `UPDATE` rows raises a division-by-zero exception, preventing the operation at the database level even for superusers who bypass RLS.
+- `app_exec` can SELECT all rows. `app_function_lead` and `app_assistant` can SELECT all rows (TODO stream C: tighten to exclude sensitive contacts once `crm.contact.sensitive_flag` lands).
+- INSERT is restricted to `app_exec`; `recordLlmCall()` always runs under a synthetic exec-tier session for this reason.
+- The secondary Google Sheet (SY-017) is a human-readable export tier. The Postgres table is the authoritative source of truth. Sheet failures are logged but never propagate to the caller.
+
+## `app_assistant` role (AD-002)
+
+A new `app_assistant` Postgres role was added in PR2-E to satisfy AD-002 (Chief-of-Staff / EA access). It has:
+
+- `USAGE` on schemas `core`, `hr`, `fin`, `legal`, `ops`, `audit`, `crm`, `pm`.
+- `SELECT` on `crm.*` and `pm.*` (read-only; sensitive contacts hidden per future stream C hardening).
+- `INSERT` on `audit.*` (same as other non-exec roles).
+- No `UPDATE` or `DELETE` on any table.
+
+The `app_runtime` login role inherits `app_assistant` so the app can `SET ROLE app_assistant` per request.

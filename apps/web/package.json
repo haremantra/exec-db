@@ -12,8 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
     "@exec-db/db": "workspace:*",
     "drizzle-orm": "^0.36.4",
+    "googleapis": "^144.0.0",
     "marked": "^14.1.4",
     "next": "^15.0.3",
     "react": "^19.0.0-rc-66855b96-20241106",
