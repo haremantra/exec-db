@@ -1,4 +1,4 @@
-# Automode plan — batch agents for PR2+
+# Automode plan — batch agents for PR2 and PR3
 
 Multi-agent execution plan for PR2 (and PR3 by extension) using the
 distributed-systems patterns: serial gates, bulkheads, backpressure,
@@ -64,7 +64,7 @@ Each agent runs in an isolated **git worktree** via the Agent tool's
 
 ```
 ~/code/exec-db                       (mainline; clean)
-  /.worktrees/
+  /.claude/worktrees/                (gitignored — see .gitignore)
     pr2-D-redaction/                 (agent D)
     pr2-E-audit-log/                 (agent E)
     pr2-A-google/                    (agent A)
@@ -104,6 +104,7 @@ Reuse the SY-017 audit-log Google Sheet. One row per agent run:
 
 | run_id | agent | stream | start | end | wall_hours | tokens | $cost | outcome | PR |
 |---|---|---|---|---|---|---|---|---|---|
+| _example_ | sonnet | D | 2026-05-08T14:00Z | 2026-05-08T18:12Z | 4.2 | 580k | $14.20 | merged | #11 |
 
 Same invariant the product enforces (every LLM call observable),
 applied to the build itself.
@@ -122,9 +123,10 @@ applied to the build itself.
 ## Cost guardrails
 
 Per-stream budget envelopes derived from `docs/scope-answers.md` re-run #2.
-Token-spend at $3.50/agent-hour (cached, mixed-model default).
 
-| Stream | Hours low / high | Token $ low / high | Hard kill at |
+**Cost-rate assumption**: **$3.50 per agent-hour of LLM spend** (cached, mixed Sonnet/Opus per the model matrix below). This is the *cost* per hour the agent is actively working — not a token rate. Token consumption per agent-hour varies by model and prompt-cache hit rate; the dollar column below is `agent_hours × $3.50`.
+
+| Stream | Hours low / high | LLM $ low / high (= hours × $3.50) | Hard kill at |
 |---|---|---|---|
 | D redaction | 16 / 32 | $56 / $112 | $250 |
 | E audit log | 10 / 20 | $35 / $70 | $200 |
