@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   jsonb,
   pgSchema,
@@ -13,6 +14,27 @@ import { lineage } from "./core.js";
 
 export const crm = pgSchema("crm");
 
+/**
+ * Sensitive-flag taxonomy (AD-001 / US-014).
+ * Null means the contact is not sensitive.
+ * A non-null value means the contact is excluded from:
+ *   - drafts generated for other contacts
+ *   - digest runs
+ *   - LLM context retrieval
+ *   - full-text search (unless the exec explicitly toggles "include sensitive")
+ * Only exec_all tier can set or clear this flag.
+ */
+export const SENSITIVE_FLAG_VALUES = [
+  "rolled_off_customer",
+  "irrelevant_vendor",
+  "acquisition_target",
+  "loi",
+  "vc_outreach",
+  "partnership",
+] as const;
+
+export type SensitiveFlag = (typeof SENSITIVE_FLAG_VALUES)[number];
+
 export const contact = crm.table(
   "contact",
   {
@@ -23,6 +45,14 @@ export const contact = crm.table(
     roleTitle: text("role_title"),
     linkedEmployeeId: uuid("linked_employee_id"),
     linkedCustomerId: uuid("linked_customer_id"),
+    /**
+     * Sensitive flag — see SENSITIVE_FLAG_VALUES for the full taxonomy.
+     * varchar(32) is used because Drizzle ORM does not natively support
+     * inline CHECK constraints on custom enum-like columns via pgEnum
+     * across schemas.  The enforcement-level CHECK constraint is declared
+     * separately in packages/db/src/rls/policies.sql (see migration note).
+     */
+    sensitiveFlag: varchar("sensitive_flag", { length: 32 }),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -34,6 +64,18 @@ export const contact = crm.table(
   (t) => [
     uniqueIndex("contact_email_uk").on(t.primaryEmail),
     index("contact_company_idx").on(t.company),
+    // CHECK constraint mirrors SENSITIVE_FLAG_VALUES; keep in sync.
+    check(
+      "contact_sensitive_flag_chk",
+      sql`${t.sensitiveFlag} IS NULL OR ${t.sensitiveFlag} IN (
+        'rolled_off_customer',
+        'irrelevant_vendor',
+        'acquisition_target',
+        'loi',
+        'vc_outreach',
+        'partnership'
+      )`,
+    ),
   ],
 );
 

@@ -4,7 +4,14 @@ import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { renderMarkdown } from "@/lib/markdown";
-import { addCallNote, discardDraft, updateCallNote } from "../actions";
+import {
+  addCallNote,
+  discardDraft,
+  updateCallNote,
+  setSensitiveFlag,
+  SENSITIVE_FLAG_VALUES,
+} from "../actions";
+import type { SensitiveFlag } from "../actions";
 
 const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -67,9 +74,33 @@ export default async function ContactDetailPage({
 
   const canWrite = session.tier === "exec_all";
   const addNote = addCallNote.bind(null, id);
+  const setFlag = setSensitiveFlag.bind(null, id);
+
+  /** Human-readable label for each sensitive-flag value. */
+  const SENSITIVE_FLAG_LABELS: Record<SensitiveFlag, string> = {
+    rolled_off_customer: "Rolled-off customer",
+    irrelevant_vendor: "Irrelevant vendor",
+    acquisition_target: "Acquisition target",
+    loi: "LOI (letter of intent)",
+    vc_outreach: "VC outreach",
+    partnership: "Partnership",
+  };
+
+  const currentFlag = data.contact.sensitiveFlag as SensitiveFlag | null;
 
   return (
     <div className="space-y-8">
+      {/* Sensitive-contact banner — visible to exec_all when a flag is set */}
+      {canWrite && currentFlag && (
+        <div
+          role="alert"
+          className="rounded-md border border-red-400 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+        >
+          <strong>This contact is marked sensitive: {SENSITIVE_FLAG_LABELS[currentFlag]}.</strong>
+          {" "}Excluded from drafts, search, and digests for non-exec users.
+        </div>
+      )}
+
       <header>
         <h2 className="text-lg font-medium">{data.contact.fullName}</h2>
         <p className="text-sm text-neutral-500">
@@ -106,6 +137,33 @@ export default async function ContactDetailPage({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* Sensitivity selector — exec_all only (US-014 / AD-001) */}
+      {canWrite && (
+        <section>
+          <h3 className="mb-2 text-sm font-medium">Sensitivity</h3>
+          <form action={setFlag} className="flex items-center gap-3">
+            <select
+              name="sensitiveFlag"
+              defaultValue={currentFlag ?? "none"}
+              className="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            >
+              <option value="none">— None (not sensitive)</option>
+              {SENSITIVE_FLAG_VALUES.map((v: SensitiveFlag) => (
+                <option key={v} value={v}>
+                  {SENSITIVE_FLAG_LABELS[v]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+            >
+              Save
+            </button>
+          </form>
         </section>
       )}
 
