@@ -60,10 +60,10 @@ _Last updated: 2026-05-07_
 - **W7.4** function lead reading exec notes: helpful.
 
 ## H. Decisions and priorities
-- **W8.1** Monday prioritization heuristic: _unanswered_
-- **W8.2** mid-week priority shifters: _unanswered_
-- **W8.3** what makes "do this first" trustworthy: _unanswered_
-- **W8.4** how you score yourself: _unanswered_
+- **W8.1** Monday prioritization heuristic: what is going to impact revenue, reputation, or both.
+- **W8.2** mid-week priority shifters: customer complaint; competitor positioning that's impacting the brand or value proposition.
+- **W8.3** what makes "do this first" trustworthy: it explains what else was evaluated to do first, and tests a counterfactual against the other priorities being deprioritized for that Monday morning.
+- **W8.4** how you score yourself: weekly review of to-do list and jobs-to-be-done completed.
 
 ## I. Pain points and dream state
 - **W9.1** worst workflow moment last month: _unanswered_
