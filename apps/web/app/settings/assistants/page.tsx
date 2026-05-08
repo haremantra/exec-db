@@ -9,7 +9,7 @@
  */
 import { redirect } from "next/navigation";
 import { schema } from "@exec-db/db";
-import { isNull, eq } from "drizzle-orm";
+import { and, isNull, eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { inviteAssistant, revokeAssistant } from "./actions";
@@ -36,8 +36,10 @@ export default async function AssistantsPage() {
         })
         .from(schema.assistantGrant)
         .where(
-          eq(schema.assistantGrant.execUserId, session.userId) &&
+          and(
+            eq(schema.assistantGrant.execUserId, session.userId),
             isNull(schema.assistantGrant.revokedAt),
+          ),
         ),
   );
 

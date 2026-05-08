@@ -2,7 +2,7 @@
 -- Row-level security policies.
 -- Read app context from session GUCs set by withSession() in src/client.ts:
 --   app.user_id        - the requesting user's employee_dim.id
---   app.tier           - exec_all | function_lead | manager | employee | assistant
+--   app.tier           - exec_all | function_lead | manager | employee
 --   app.function_area  - eng | sales | gtm | ops | finance | legal | hr (or '')
 -- ============================================================================
 
@@ -149,7 +149,9 @@ $$;
 --   exec_all          → read + write (sees ALL contacts including sensitive)
 --   function_lead     → read-only (sensitive contacts hidden)
 --   manager           → read-only (sensitive contacts hidden)
---   assistant         → read-only (sensitive contacts hidden) — PR2-H (AD-002, US-023)
+--   app_assistant     → read-only (sensitive contacts hidden) — Stream H adds
+--                       the Postgres role; this policy already excludes them
+--                       via the non-exec_all branch.
 --   employee          → no access (except self-owned pm.task, see below)
 --
 -- We DROP/CREATE every policy idempotently to match the rest of this file.
@@ -168,9 +170,8 @@ $$;
 -- exec_all always sees everything — the function returns FALSE for them
 -- regardless of the flag value.
 --
--- The 'assistant' tier falls into the non-exec_all branch automatically,
--- so adding 'assistant' to the read whitelist does NOT bypass sensitive-flag
--- hiding (AD-002 acceptance criterion).
+-- Stream H (app_assistant) does not yet have a Postgres role, but once
+-- added it will fall into the non-exec_all branch automatically.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION crm.is_sensitive_for_role(p_contact_id uuid)
@@ -204,9 +205,8 @@ CREATE POLICY contact_read ON crm.contact FOR SELECT
   USING (
     app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     -- Sensitive contacts are hidden from all non-exec tiers.
-    -- is_sensitive_for_role() returns TRUE for any tier != exec_all when sensitive_flag is set,
-    -- so adding 'assistant' here does NOT bypass sensitive-flag hiding (AD-002, US-014).
     AND NOT crm.is_sensitive_for_role(crm.contact.id)
+    -- exec_all sees everything: is_sensitive_for_role returns false for them.
   );
 
 DROP POLICY IF EXISTS contact_write ON crm.contact;
@@ -298,6 +298,33 @@ CREATE POLICY draft_write ON crm.draft FOR ALL
   USING (app.current_tier() = 'exec_all')
   WITH CHECK (app.current_tier() = 'exec_all');
 
+-- ----- crm.oauth_token -----
+-- app_runtime: users may only read/write their own tokens.
+-- app_exec:    audit visibility (SELECT all). DELETE is exec-only (hard delete for now).
+-- Stream A owns these policies. DROP IF EXISTS + CREATE keeps merges clean.
+ALTER TABLE crm.oauth_token ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.oauth_token FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS oauth_token_self_select ON crm.oauth_token;
+CREATE POLICY oauth_token_self_select ON crm.oauth_token FOR SELECT
+  USING (
+    crm.oauth_token.user_id = app.current_user_id()
+    OR app.current_tier() = 'exec_all'
+  );
+
+DROP POLICY IF EXISTS oauth_token_self_insert ON crm.oauth_token;
+CREATE POLICY oauth_token_self_insert ON crm.oauth_token FOR INSERT
+  WITH CHECK (crm.oauth_token.user_id = app.current_user_id());
+
+DROP POLICY IF EXISTS oauth_token_self_update ON crm.oauth_token;
+CREATE POLICY oauth_token_self_update ON crm.oauth_token FOR UPDATE
+  USING (crm.oauth_token.user_id = app.current_user_id())
+  WITH CHECK (crm.oauth_token.user_id = app.current_user_id());
+
+DROP POLICY IF EXISTS oauth_token_exec_delete ON crm.oauth_token;
+CREATE POLICY oauth_token_exec_delete ON crm.oauth_token FOR DELETE
+  USING (app.current_tier() = 'exec_all');
+
 -- ----- pm.project -----
 ALTER TABLE pm.project ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pm.project FORCE ROW LEVEL SECURITY;
@@ -371,6 +398,9 @@ CREATE POLICY digest_send_write ON pm.digest_send FOR ALL
 -- INSERT:  app_exec only (audit writes always run as app_exec per recordLlmCall).
 -- SELECT:  app_exec can read all rows.
 --          app_function_lead + app_assistant can read all rows.
+--          TODO(stream C): tighten function_lead + assistant SELECT to exclude
+--          rows whose contact_id resolves to a sensitive contact once
+--          crm.contact.sensitive_flag is added by stream C.
 -- ============================================================================
 
 ALTER TABLE audit.llm_call ENABLE ROW LEVEL SECURITY;
@@ -380,7 +410,8 @@ DROP POLICY IF EXISTS llm_call_exec_read ON audit.llm_call;
 CREATE POLICY llm_call_exec_read ON audit.llm_call FOR SELECT
   USING (app.current_tier() = 'exec_all');
 
--- function_lead and assistant may read all rows.
+-- function_lead and app_assistant may read all rows for now.
+-- TODO(stream C): join to crm.contact and exclude sensitive contacts.
 DROP POLICY IF EXISTS llm_call_lead_read ON audit.llm_call;
 CREATE POLICY llm_call_lead_read ON audit.llm_call FOR SELECT
   USING (app.current_tier() IN ('function_lead', 'assistant'));
