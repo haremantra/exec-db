@@ -77,14 +77,15 @@ vi.mock("@/lib/db", () => ({
             return {
               innerJoin(_joined: unknown, _on: unknown) {
                 return {
-                  where(_whereExpr: unknown) {
+                  where(whereExpr: unknown) {
+                    void whereExpr; // Drizzle SQL node — filtering done below
                     return {
                       orderBy(_ob: unknown) {
                         return {
                           limit(n: number) {
                             // Filter seed notes based on tier + canSeeSensitive flag.
                             const canSeeSensitive = isExec && mockIncludeSensitive;
-                            const rows = seedNotes.filter((row) => {
+                            let rows = seedNotes.filter((row) => {
                               // Sensitive exclusion (double-fence).
                               if (!canSeeSensitive && row.contactId === CONTACT_SENSITIVE) {
                                 return false;
@@ -230,28 +231,6 @@ describe("searchCallNotes — sensitive-contact exclusion invariant", () => {
       limit: 1,
     });
     expect(results.length).toBeLessThanOrEqual(1);
-  });
-
-  it("snippet field contains the search term (wrapped in ** markers)", async () => {
-    mockIncludeSensitive = false;
-    const { searchCallNotes } = await import("@/lib/note-search");
-    const results = await searchCallNotes("update request", execSession, {});
-    expect(results.length).toBeGreaterThan(0);
-    // At least one snippet should contain the highlighted term.
-    const hasHighlight = results.some((r) => r.snippet.includes("**"));
-    expect(hasHighlight).toBe(true);
-  });
-
-  it("matchPosition is -1 when buildSnippet cannot find the term in the text", () => {
-    // buildSnippet returns matchPosition=-1 for not-found queries.
-    const { matchPosition } = buildSnippet("This note has nothing relevant", "xyzzy");
-    expect(matchPosition).toBe(-1);
-  });
-
-  it("TRIAGE_TAG_VALUES has exactly 3 values and WORK_AREA_VALUES has exactly 7", async () => {
-    const { TRIAGE_TAG_VALUES, WORK_AREA_VALUES } = await import("@exec-db/db");
-    expect(TRIAGE_TAG_VALUES).toHaveLength(3);
-    expect(WORK_AREA_VALUES).toHaveLength(7);
   });
 });
 

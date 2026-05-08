@@ -99,37 +99,11 @@ export const contact = crm.table(
      * separately in packages/db/src/rls/policies.sql (see migration note).
      */
     sensitiveFlag: varchar("sensitive_flag", { length: 32 }),
-    /**
-     * Triage tag (I1 — US-007, W2.5).
-     * Captures the exec's weekly follow-up triage: can I help them, can they
-     * help me, or are they a pilot candidate?  NULL means untagged.
-     *
-     * Migration SQL:
-     *   ALTER TABLE crm.contact ADD COLUMN triage_tag varchar(32);
-     *   ALTER TABLE crm.contact ADD CONSTRAINT contact_triage_tag_chk
-     *     CHECK (triage_tag IS NULL OR triage_tag IN
-     *       ('can_help_them', 'can_help_me', 'pilot_candidate'));
-     */
+    /** Triage tag (I1 — US-007, W2.5). NULL = untagged. */
     triageTag: varchar("triage_tag", { length: 32 }),
-    /**
-     * Work-area tag (I3 — US-001, W1.1).
-     * Groups the contact by the exec's operational work area for the Monday
-     * dashboard swimlane view.  NULL means untagged.
-     *
-     * Migration SQL:
-     *   ALTER TABLE crm.contact ADD COLUMN work_area varchar(32);
-     *   ALTER TABLE crm.contact ADD CONSTRAINT contact_work_area_chk
-     *     CHECK (work_area IS NULL OR work_area IN
-     *       ('prospecting','customer','investor','contractor',
-     *        'board','thought_leadership','admin'));
-     */
+    /** Work-area tag (I3 — US-001, W1.1). NULL = untagged. */
     workArea: varchar("work_area", { length: 32 }),
-    /**
-     * Draft flag (G1/G4 — US-005, SY-001).
-     * true  → contact was auto-created from a LinkedIn URL or email intake
-     *         and awaits exec confirmation ("needs review").
-     * false → exec-confirmed; never overwritten by auto-create logic.
-     */
+    /** Draft flag (G — US-005, SY-001). */
     isDraft: boolean("is_draft").notNull().default(false),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -97,6 +97,36 @@ Only `exec_all` tier may call the `setSensitiveFlag(contactId, formData)` server
 
 The flag is reversible: pass `"none"` or `null` to clear it.
 
+### Full-text search exclusion (I2 — US-008)
+
+The `/crm/search` page and the `searchCallNotes()` helper in `apps/web/lib/note-search.ts`
+enforce sensitive-contact exclusion at **two independent layers**:
+
+1. **RLS (database layer):** The existing `crm.is_sensitive_for_role()` function hides
+   sensitive-contact rows from any non-`exec_all` database role before the query result
+   reaches the application.  This is the primary enforcement mechanism added in PR2-C.
+
+2. **Application layer (double-fence):** `searchCallNotes()` independently adds a
+   `WHERE crm.contact.sensitive_flag IS NULL` condition to every query for non-`exec_all`
+   callers.  This ensures that even if the RLS policy were bypassed or misconfigured,
+   sensitive notes would still be excluded.
+
+#### Sensitive-search toggle behaviour
+
+| Caller tier | `includeSensitive` option | Sensitive contacts in results? |
+|---|---|---|
+| `exec_all` | `false` (default) | No |
+| `exec_all` | `true` | Yes |
+| Any non-exec tier | `true` (set by caller) | No — option is **silently ignored** |
+| Any non-exec tier | `false` | No |
+
+The "silently ignored" behaviour is intentional: a non-exec caller passing `includeSensitive=true`
+gets the same result as `includeSensitive=false`, with no error raised.  The front-end
+checkbox is only rendered for `exec_all` sessions, so this case should not arise in
+normal use; the guard exists for defence-in-depth against direct API or programmatic calls.
+
+This invariant is proven by `apps/web/__tests__/note-search.test.ts` (runs on every push).
+
 ### Cross-pollination invariant
 
 > **Invariant (SY-008 / AD-008):** When generating any draft or briefing for contact A, no data belonging to a different contact B is retrieved as LLM context.
