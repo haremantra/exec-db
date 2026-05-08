@@ -20,3 +20,6 @@ transform/target
 transform/dbt_packages
 transform/logs
 transform/profiles.yml
+
+# Local agent worktrees created by the Claude Code Agent tool
+.claude/worktrees/
