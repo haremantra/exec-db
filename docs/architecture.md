@@ -1,5 +1,92 @@
 # Architecture
 
+## Retrospective + check-in (Stream R — PR3-R)
+
+### Weekly retrospective view (`/retrospective`)
+
+Implements US-022 (W8.4) — exec's Friday/Sunday self-scoring of the week.
+
+**Route**: `apps/web/app/retrospective/page.tsx` — server component, `force-dynamic`.
+
+**Data flow**:
+```
+GET /retrospective
+  │
+  ├─ getSession() — redirect to sign-in if null
+  │
+  ├─ SELECT pm.task JOIN pm.project
+  │     WHERE owner_id = session.userId
+  │       AND status = 'done'
+  │       AND completed_at >= now() - interval '7 days'
+  │
+  ├─ Group by pm.project.name for display
+  │
+  ├─ "Jobs-to-be-done resolved" subset:
+  │     impact IN ('revenue', 'reputation', 'both') AND status = 'done'
+  │
+  └─ Per-task <form> → recordRetrospectiveJudgement(taskId, formData)
+       ├─ Reads "judgement" field from FormData
+       ├─ Validates ∈ {"kept_promise", "partial", "broke_promise"}
+       └─ INSERT audit.access_log intent="retrospective_judgement"
+            metadata: { taskId, judgement }
+            (used for future ranker training — see TODO in actions.ts)
+```
+
+**Files**:
+| File | Purpose |
+|---|---|
+| `apps/web/app/retrospective/page.tsx` | Server component rendering retrospective view |
+| `apps/web/app/retrospective/actions.ts` | `recordRetrospectiveJudgement` server action |
+
+**Nav link**: added between `/dashboard` and `/crm` in `apps/web/app/layout.tsx`.
+
+### Awaiting-response check-in badge (R2 — SY-010, US-020)
+
+Extends `apps/web/app/pm/projects/[id]/page.tsx` (additive).
+
+When a task has `awaiting_response_until` set and that timestamp is in the past
+(`awaitingResponseUntil < new Date()`), the task card shows:
+
+- An **orange "Needs check-in" badge** surfacing the delegation gap.
+- A **"Draft check-in" link** to `/crm/contacts?draft_checkin=1&task_title=<title>`,
+  which pre-fills the autodraft generation flow (Stream B / `generateAutodraft`)
+  with the task title as context. No new server action required — consumes the
+  `awaiting_response_until` column added by Stream K.
+
+The badge is purely additive — it does not affect the 5-column kanban layout,
+existing filters, or any other task-card content.
+
+### Pending-draft reminder in digest (R3 — US-013, W4.3)
+
+Extends `apps/web/lib/digest-body.ts` (additive section, clearly marked).
+
+A new `crm.draft` query runs after the tasks fetch:
+```sql
+SELECT draft.*, contact.full_name
+FROM crm.draft
+LEFT JOIN crm.contact ON draft.contact_id = contact.id
+WHERE draft.status = 'pending'
+  AND draft.generated_at < now() - interval '24h'
+```
+
+The results render as a `## Drafts pending review (>24h)` markdown section
+containing: contact name (linked to contact page), draft subject, generated_at.
+
+**Concurrency note**: Stream R's section is inserted **after** Stream P's
+"Top priorities" block and **before** Stream N's "Slipped" block, as a
+clearly-marked `// ── STREAM R` block. Merge order: P lands first (replaces
+`assembleDigestBody` stub), then N (adds slipped section after R's block),
+then R — or whichever order CI resolves. The `// ── END STREAM R` comment
+is the merge anchor for N.
+
+### Key invariants
+
+| Invariant | Enforced by |
+|---|---|
+| No LLM calls | Retrospective view is purely deterministic SQL + HTML render |
+| Audit trail | Every judgement writes to `audit.access_log` |
+| Valid judgements only | `RETROSPECTIVE_JUDGEMENT_VALUES` allowlist check before any DB write |
+
 ## PR3 task ergonomics — new columns (K1-K4)
 
 Four columns added in `PR3-K` that downstream streams depend on.

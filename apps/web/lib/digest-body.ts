@@ -20,7 +20,7 @@
  *   For weekly: also include tasks completed in the last 7 days.
  */
 
-import { and, eq, gt, inArray, not, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, not, sql } from "drizzle-orm";
 import { schema } from "@exec-db/db";
 import { query } from "@/lib/db";
 
@@ -131,6 +131,33 @@ export async function assembleDigestBody(
   const activeTasks = tasks.filter((t) => t.status !== "done");
   const recentlyDone = tasks.filter((t) => t.status === "done");
 
+  // ── STREAM R: Pending-draft reminder (US-013, W4.3) ──────────────────────────
+  // Fetch crm.draft rows that are still pending after >24h.
+  // Excludes drafts with status 'saved_to_gmail' or 'discarded'.
+  // Placed after Stream P's "Top priorities" block, before Stream N's "Slipped".
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const pendingDrafts = await query(
+    { userId, tier: "exec_all", functionArea: null },
+    async (tx) =>
+      tx
+        .select({
+          draftId: schema.draft.id,
+          contactId: schema.draft.contactId,
+          subject: schema.draft.subject,
+          generatedAt: schema.draft.generatedAt,
+          contactName: schema.contact.fullName,
+        })
+        .from(schema.draft)
+        .leftJoin(schema.contact, eq(schema.draft.contactId, schema.contact.id))
+        .where(
+          and(
+            eq(schema.draft.status, "pending"),
+            lt(schema.draft.generatedAt, twentyFourHoursAgo),
+          ),
+        ),
+  );
+  // ── END STREAM R ─────────────────────────────────────────────────────────────
+
   // --- Build plain-text and HTML body ---
   const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://exec-db.local";
   const unsubLink = `${appBaseUrl}/api/digest/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
@@ -169,6 +196,22 @@ export async function assembleDigestBody(
     lines.push("");
   }
 
+  // ── STREAM R: Pending-draft reminder section (US-013, W4.3) ─────────────────
+  // Inserted after Stream P's "Top priorities" block, before Stream N's "Slipped".
+  if (pendingDrafts.length > 0) {
+    lines.push(`## Drafts pending review (>24h) (${pendingDrafts.length})`);
+    lines.push("");
+    for (const d of pendingDrafts) {
+      const contact = d.contactName ?? "(unknown contact)";
+      const subject = d.subject ?? "(no subject)";
+      const age = formatGeneratedAt(d.generatedAt);
+      const contactLink = `${appBaseUrl}/crm/contacts/${d.contactId}`;
+      lines.push(`- [${contact}](${contactLink}) — "${subject}" — generated ${age}`);
+    }
+    lines.push("");
+  }
+  // ── END STREAM R ─────────────────────────────────────────────────────────────
+
   lines.push("---");
   lines.push(`[Unsubscribe from digest emails](${unsubLink})`);
 
@@ -186,6 +229,17 @@ export async function assembleDigestBody(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatGeneratedAt(d: Date | null | undefined): string {
+  if (!d) return "unknown date";
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Los_Angeles",
+  });
+}
 
 function priorityLabel(priority: number | null | undefined): string {
   if (priority === null || priority === undefined) return "";
