@@ -1,6 +1,6 @@
 "use server";
 
-import { schema } from "@exec-db/db";
+import { IMPACT_VALUES, PROJECT_TYPE_VALUES, TASK_STATUS_VALUES, schema } from "@exec-db/db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -67,9 +67,13 @@ export async function createTask(projectId: string, formData: FormData): Promise
 export async function updateTaskStatus(
   taskId: string,
   projectId: string,
-  status: "todo" | "in_progress" | "blocked" | "done",
+  status: (typeof TASK_STATUS_VALUES)[number],
 ): Promise<void> {
   const session = await getSession();
+
+  if (!(TASK_STATUS_VALUES as readonly string[]).includes(status)) {
+    throw new Error(`Invalid status: ${status}`);
+  }
 
   await query(ctx(session), (tx) =>
     tx
@@ -83,4 +87,104 @@ export async function updateTaskStatus(
   );
 
   revalidatePath(`/pm/projects/${projectId}`);
+}
+
+/**
+ * Set or clear the impact tag on a task (K1 — US-021, W8.1).
+ * exec_all only. Pass "none" in formData to clear (sets null).
+ */
+export async function setTaskImpact(
+  taskId: string,
+  projectId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+  const c = ctx(session);
+  if (c.tier !== "exec_all") throw new Error("exec_all required");
+
+  const raw = String(formData.get("impact") ?? "").trim();
+  const impact =
+    raw === "none" || raw === ""
+      ? null
+      : (IMPACT_VALUES as readonly string[]).includes(raw)
+        ? (raw as (typeof IMPACT_VALUES)[number])
+        : null;
+
+  if (raw !== "none" && raw !== "" && impact === null) {
+    throw new Error(`Invalid impact value: ${raw}`);
+  }
+
+  await query(c, (tx) =>
+    tx
+      .update(schema.task)
+      .set({ impact, updatedAt: new Date() })
+      .where(eq(schema.task.id, taskId)),
+  );
+
+  revalidatePath(`/pm/projects/${projectId}`);
+}
+
+/**
+ * Toggle the is_pinned flag on a task (K2 — US-004, W1.5).
+ * exec_all only. formData must carry `pinned` = "true" | "false".
+ *
+ * CONTRACT: setting is_pinned=true on a done task is allowed — the pin
+ * persists across weekly resets.  Dashboard (Stream L) uses
+ * `is_pinned AND status != 'done'` to determine sticky-top visibility.
+ */
+export async function setTaskPinned(
+  taskId: string,
+  projectId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+  const c = ctx(session);
+  if (c.tier !== "exec_all") throw new Error("exec_all required");
+
+  const raw = String(formData.get("pinned") ?? "").trim();
+  const isPinned = raw === "true";
+
+  await query(c, (tx) =>
+    tx
+      .update(schema.task)
+      .set({ isPinned, updatedAt: new Date() })
+      .where(eq(schema.task.id, taskId)),
+  );
+
+  revalidatePath(`/pm/projects/${projectId}`);
+}
+
+/**
+ * Set or clear the project_type tag on a project (K4 — US-018, W6.1).
+ * exec_all only. Pass "none" in formData to clear (sets null).
+ */
+export async function setProjectType(
+  projectId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+  const c = ctx(session);
+  if (c.tier !== "exec_all") throw new Error("exec_all required");
+
+  const raw = String(formData.get("project_type") ?? "").trim();
+  const projectType =
+    raw === "none" || raw === ""
+      ? null
+      : (PROJECT_TYPE_VALUES as readonly string[]).includes(raw)
+        ? (raw as (typeof PROJECT_TYPE_VALUES)[number])
+        : null;
+
+  if (raw !== "none" && raw !== "" && projectType === null) {
+    throw new Error(`Invalid project_type value: ${raw}`);
+  }
+
+  await query(c, (tx) =>
+    tx
+      .update(schema.project)
+      .set({ projectType, updatedAt: new Date() })
+      .where(eq(schema.project.id, projectId)),
+  );
+
+  revalidatePath(`/pm/projects/${projectId}`);
+  revalidatePath("/pm/projects");
 }

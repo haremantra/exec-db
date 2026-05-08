@@ -1,5 +1,18 @@
 # Architecture
 
+## PR3 task ergonomics — new columns (K1-K4)
+
+Four columns added in `PR3-K` that downstream streams depend on.
+
+| Column | Table | Type | Allowed values | Purpose | Downstream consumers |
+|---|---|---|---|---|---|
+| `impact` | `pm.task` | `varchar(16)` nullable | `revenue \| reputation \| both \| neither` | Exec labels each task by what it protects/grows — Monday dashboard (L) orders swimlane items by this field. | L (ordering), M (ranking input), P (digest ranking) |
+| `is_pinned` | `pm.task` | `boolean not null default false` | — | Pinned tasks survive weekly resets; dashboard (L) renders them sticky-top when `is_pinned AND status != 'done'`. Unpinning is always explicit. | L (sticky-top), O (digest header) |
+| `awaiting_response_until` | `pm.task` | `timestamptz` nullable | — | Date by which exec expects a reply. Stream R auto-flags tasks past this date as "Needs check-in." Added in K so all streams share the column definition. | R (auto-flag), N (slipped-task), P (digest) |
+| `project_type` | `pm.project` | `varchar(16)` nullable | `sales_call \| licensing \| hire \| deal \| board_prep \| okr \| other` | Groups projects by deal/initiative type for retrospective reports and digest sections. | R (retrospective grouping), P (digest section) |
+
+Status `stuck` added as a distinct value (previously conflated with `blocked`): `blocked` = dependency on money/human (plan exists); `stuck` = outside exec's expertise/bandwidth (no plan yet). Both appear as separate columns in the 5-column kanban.
+
 ## PR2 invariants — verified by tests + CI
 
 Six cross-cutting properties that no PR2 commit is allowed to break. Each is enforced by at least one test and/or a CI step.
