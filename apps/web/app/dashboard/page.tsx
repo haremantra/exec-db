@@ -1,37 +1,210 @@
+/**
+ * dashboard/page.tsx — Monday "What matters this week" dashboard.
+ *
+ * Server component, force-dynamic (live data per session).
+ * Renders exactly 5 swimlanes (cross-cutting invariant #6 from user-stories.md)
+ * with the counterfactual "Do this first" card (Stream M, US-024 / SY-013) at
+ * the top.
+ *
+ * Swimlane order matches W6.6 verbatim:
+ *   1. Prospects to follow up
+ *   2. Inbox progress
+ *   3. Admin (vendors / contractors)
+ *   4. Thought leadership
+ *   5. Product roadmap
+ */
+
 import { schema } from "@exec-db/db";
 import { and, desc, eq, ne } from "drizzle-orm";
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { getDashboardLanes, LANE_LIMIT } from "@/lib/dashboard";
+import type { DashboardInbox, DashboardProspect, DashboardTask } from "@/lib/dashboard";
 import { rankTasks, type RankerTask, type RankingResult } from "@/lib/ranker";
+import {
+  detectPriorityShifters,
+  type PriorityShifter,
+} from "@/lib/priority-shifters";
+import { getCloseReadyCohort, type CloseReadyContact } from "@/lib/close-ready";
+import { getSlippedTasks, type SlippedTask } from "@/lib/slipped-tasks";
 import { disagreeWithRanker } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Monday "what matters this week" dashboard (Stream L) + counterfactual
- * "Do this first" card (Stream M).
- *
- * Stream M (this PR) owns the "Do this first" card. Stream L will replace
- * the rest of this file with the 5-swimlane scaffold (US-017, W6.6, invariant
- * #6) and leave a `<div id="do-this-first" />` stub above the swimlanes.
- *
- * MERGE HANDOFF: when L merges first, the only edit needed here is to drop
- * the placeholder swimlane note below — the "Do this first" card stays.
- */
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
+function SwimlaneHeader({ title, count }: { title: string; count: number | null }) {
+  return (
+    <div className="flex items-baseline justify-between border-b border-neutral-200 pb-2 dark:border-neutral-800">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700 dark:text-neutral-300">
+        {title}
+      </h2>
+      {count !== null && (
+        <span className="text-xs text-neutral-400">{count} item{count !== 1 ? "s" : ""}</span>
+      )}
+    </div>
+  );
+}
+
+function EmptyLane({ message }: { message: string }) {
+  return (
+    <p className="px-1 py-3 text-xs italic text-neutral-400">{message}</p>
+  );
+}
+
+function PinnedBadge() {
+  return (
+    <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+      pinned
+    </span>
+  );
+}
+
+function ImpactBadge({ impact }: { impact: string | null }) {
+  if (!impact) return null;
+  const colours: Record<string, string> = {
+    both:       "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300",
+    revenue:    "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+    reputation: "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300",
+    neither:    "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400",
+  };
+  const cls = colours[impact] ?? colours.neither;
+  return (
+    <span className={`ml-1.5 rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>
+      {impact}
+    </span>
+  );
+}
+
+// ── Lane 1: Prospects ─────────────────────────────────────────────────────────
+
+function ProspectsLane({ items }: { items: DashboardProspect[] }) {
+  return (
+    <section className="space-y-2" aria-label="Prospects to follow up">
+      <SwimlaneHeader title="Prospects to follow up" count={items.length} />
+      {items.length === 0 ? (
+        <EmptyLane message="No prospects to follow up — tag a contact with can_help_them, can_help_me, or pilot_candidate to populate this lane." />
+      ) : (
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-900">
+          {items.map((p) => (
+            <li key={p.id} className="flex flex-col gap-0.5 py-2.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-medium">{p.fullName}</span>
+                <span className="text-xs text-neutral-400">
+                  {p.lastTouchAt
+                    ? `last touch ${new Date(p.lastTouchAt).toLocaleDateString()}`
+                    : "never touched"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-neutral-500">
+                {p.company && <span>{p.company}</span>}
+                {p.roleTitle && <span>· {p.roleTitle}</span>}
+                <span className="ml-auto rounded bg-neutral-100 px-1.5 py-0.5 dark:bg-neutral-800">
+                  {p.reason}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// ── Lane 2: Inbox progress ────────────────────────────────────────────────────
+
+function InboxLane({ inbox }: { inbox: DashboardInbox }) {
+  const hasItems = inbox.pendingDraftCount > 0 || inbox.gmailUnreadCount !== null;
+  return (
+    <section className="space-y-2" aria-label="Inbox progress">
+      <SwimlaneHeader title="Inbox progress" count={null} />
+      {!hasItems && inbox.pendingDraftCount === 0 ? (
+        <EmptyLane message="No pending drafts — generate a follow-up from a call note to populate this lane." />
+      ) : (
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-900">
+          <li className="flex items-center justify-between py-2.5">
+            <span className="text-sm">Pending drafts awaiting review</span>
+            <span className="text-sm font-medium">{inbox.pendingDraftCount}</span>
+          </li>
+          <li className="flex items-center justify-between py-2.5">
+            <span className="text-sm">Unread emails</span>
+            {/* TODO: Stream A (Google/Gmail) will provide getGmailUnreadCount().
+                       Until that PR lands, this count is unavailable. See US-002. */}
+            <span className="text-sm text-neutral-400">
+              {inbox.gmailUnreadCount !== null ? inbox.gmailUnreadCount : "—"}
+            </span>
+          </li>
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// ── Lane 3, 4, 5: Task lanes ──────────────────────────────────────────────────
+
+function TaskLane({
+  label,
+  ariaLabel,
+  items,
+  emptyMessage,
+}: {
+  label: string;
+  ariaLabel: string;
+  items: DashboardTask[];
+  emptyMessage: string;
+}) {
+  return (
+    <section className="space-y-2" aria-label={ariaLabel}>
+      <SwimlaneHeader title={label} count={items.length} />
+      {items.length === 0 ? (
+        <EmptyLane message={emptyMessage} />
+      ) : (
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-900">
+          {items.map((t) => (
+            <li key={t.id} className="flex flex-col gap-0.5 py-2.5">
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm font-medium">{t.title}</span>
+                {t.isPinned && <PinnedBadge />}
+                <ImpactBadge impact={t.impact} />
+              </div>
+              <div className="flex items-center gap-2 text-xs text-neutral-400">
+                <span className="rounded border border-neutral-200 px-1.5 py-0.5 dark:border-neutral-700">
+                  {t.status}
+                </span>
+                {t.dueDate && <span>due {t.dueDate}</span>}
+                {t.projectType && (
+                  <span className="ml-auto text-neutral-400">{t.projectType}</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default async function DashboardPage(): Promise<JSX.Element> {
   const session = await getSession();
-  if (!session) return <p className="text-sm">Sign in required.</p>;
+  if (!session) {
+    return (
+      <p className="text-sm text-neutral-500">Sign in required to view the dashboard.</p>
+    );
+  }
 
+  const lanes = await getDashboardLanes(session);
+
+  // ── "Do this first" candidate set (Stream M) ─────────────────────────────────
+  // Pull up to 20 active owned tasks; the ranker (Opus) returns top pick +
+  // alternatives with counterfactual reasoning (invariant #7).
   const ctx = {
     userId: session.userId,
     tier: session.tier,
     functionArea: session.functionArea,
   };
-
-  // Pull the top candidates for ranking. We only consider tasks that the exec
-  // owns and that are not already done. Pinned items are picked up by the
-  // same query (the ranker's candidate selection respects pinned-first).
   const rows = await query(ctx, (tx) =>
     tx
       .select({
@@ -55,7 +228,6 @@ export default async function DashboardPage(): Promise<JSX.Element> {
       .orderBy(desc(schema.task.isPinned), desc(schema.task.updatedAt))
       .limit(20),
   );
-
   const candidates: RankerTask[] = rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -67,36 +239,286 @@ export default async function DashboardPage(): Promise<JSX.Element> {
     status: r.status,
   }));
 
-  const ranking = await rankTasks(candidates, session);
+  // Run ranker and priority-shifter detection concurrently.
+  const [ranking, shifters] = await Promise.all([
+    rankTasks(candidates, session),
+    detectPriorityShifters(session),
+  ]);
 
-  // Map rows by id for the card UI.
   const byId = new Map(rows.map((r) => [r.id, r] as const));
+
+  // {/* Stream N */} — Tuesday cohort + slipped tasks
+  // Use new Date().getDay() === 2 as a stand-in for America/Los_Angeles Tuesday.
+  const isTuesday = new Date().getDay() === 2;
+
+  // Fetch close-ready cohort on Tuesdays and slipped tasks every day.
+  const [closeReadyCohort, slippedTasks] = await Promise.all([
+    isTuesday ? getCloseReadyCohort(session) : Promise.resolve([] as CloseReadyContact[]),
+    getSlippedTasks(session),
+  ]);
 
   return (
     <div className="space-y-8">
+      {/* Q: Priority-shifters banner — OUTSIDE swimlane grid (invariant #6 preserved). */}
+      {shifters.length > 0 && (
+        <PriorityShiftersBanner shifters={shifters} />
+      )}
+
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight">What matters this week</h1>
+        <p className="mt-1 text-sm text-neutral-500">
+          {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+        </p>
+      </header>
+
+      {/* Stream N — Slipped tasks banner (always visible when tasks have slipped) */}
+      {slippedTasks.length > 0 && (
+        <SlippedBanner count={slippedTasks.length} />
+      )}
+
+      {/* Stream N — Tuesday "Sales — close-ready" section (Tuesdays only, above Do this first) */}
+      {isTuesday && closeReadyCohort.length > 0 && (
+        <CloseReadySection contacts={closeReadyCohort} />
+      )}
+
+      {/* Stream M: "Do this first" counterfactual card (US-024 / SY-013). */}
+      <DoThisFirstCard ranking={ranking} byId={byId} />
+
+      {/* Exactly 5 swimlanes — invariant #6 */}
+      <div className="grid gap-6">
+        {/* Lane 1 */}
+        <ProspectsLane items={lanes.prospects} />
+
+        {/* Lane 2 */}
+        <InboxLane inbox={lanes.inbox} />
+
+        {/* Lane 3 */}
+        <TaskLane
+          label="Admin (vendors / contractors)"
+          ariaLabel="Admin tasks"
+          items={lanes.admin}
+          emptyMessage={`No admin tasks — tag a task with work_area=admin to populate this lane. (Shows up to ${LANE_LIMIT} items.)`}
+        />
+
+        {/* Lane 4 */}
+        <TaskLane
+          label="Thought leadership"
+          ariaLabel="Thought leadership tasks"
+          items={lanes.thoughtLeadership}
+          emptyMessage={`No thought-leadership tasks — tag a task with work_area=thought_leadership to populate this lane. (Shows up to ${LANE_LIMIT} items.)`}
+        />
+
+        {/* Lane 5 */}
+        <TaskLane
+          label="Product roadmap"
+          ariaLabel="Product roadmap tasks"
+          items={lanes.productRoadmap}
+          emptyMessage={`No roadmap tasks — tag a task with a project of type hire, deal, okr, or other (and work_area outside admin/thought_leadership) to populate this lane. (Shows up to ${LANE_LIMIT} items.)`}
+        />
+      </div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// Stream N — Invariant #6 regression guard
+// ---------------------------------------------------------------------------
+
+/**
+ * SWIMLANE_KEYS — the exactly-five swimlane keys for the Monday dashboard.
+ * Invariant #6: the Monday view shows exactly five swimlanes — never four, never six.
+ * This constant is the canonical list. Tests import it to verify the count.
+ * Stream L renders these; Stream N must never add to this list.
+ *
+ * US-017, W6.6, pr3-spec.md invariant #6.
+ */
+export const SWIMLANE_KEYS = [
+  "prospects_followup",
+  "inbox_progress",
+  "admin",
+  "thought_leadership",
+  "product_roadmap",
+] as const;
+
+export type SwimlanKey = (typeof SWIMLANE_KEYS)[number];
+
+// ---------------------------------------------------------------------------
+// Stream N — Close-ready section (Tuesdays only)
+// ---------------------------------------------------------------------------
+
+function CloseReadySection({ contacts }: { contacts: CloseReadyContact[] }): JSX.Element {
+  return (
+    <section
+      aria-label="Sales — close-ready"
+      className="rounded-md border-2 border-emerald-400 bg-emerald-50 p-4 dark:border-emerald-600 dark:bg-emerald-950"
+    >
       <header className="flex items-baseline justify-between">
-        <h2 className="text-base font-medium">Monday — what matters this week</h2>
-        <span className="text-xs text-neutral-500">
-          ranked by revenue + reputation impact
+        <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+          Sales — close-ready
+        </h3>
+        <span className="text-xs text-emerald-700 dark:text-emerald-300">
+          warm reply ≤7d · qualified · no blockers · Tuesday
         </span>
       </header>
 
-      {/* M: Do this first card — replaces L's <div id="do-this-first" /> stub */}
-      <DoThisFirstCard ranking={ranking} byId={byId} />
+      <ul className="mt-3 space-y-3">
+        {contacts.map((c) => {
+          const touchLabel = c.lastTouchKind === "email" ? "email" : "note";
+          const touchDate = c.lastTouchAt.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          });
 
-      {/* Stream L will render the 5-swimlane layout here:
-           prospects-followup | inbox-progress | admin | thought-leadership | product-roadmap
-           (US-017, W6.6, invariant #6).  Placeholder until L merges. */}
-      <section className="rounded-md border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 dark:border-neutral-700">
-        Swimlanes will be rendered by Stream L. This dashboard route is shared
-        between L (layout) and M (this card).
-      </section>
+          // Google Calendar new-event URL (no auth required to open).
+          const calUrl =
+            `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+            `&text=${encodeURIComponent(`Call with ${c.contactName}`)}` +
+            `&details=${encodeURIComponent("Scheduled via exec-db close-ready cohort")}`;
+
+          // Draft close email URL: links to contact page with autodraft tone pre-selected.
+          const draftUrl =
+            `/crm/contacts/${c.contactId}` +
+            `?autodraft_tone=warm-sales-followup`;
+
+          return (
+            <li
+              key={c.contactId}
+              className="flex flex-wrap items-center justify-between gap-2 rounded bg-white/60 px-3 py-2 dark:bg-neutral-900/40"
+            >
+              <div className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  {c.contactName}
+                </span>
+                <span className="text-xs text-neutral-500">
+                  last {touchLabel} {touchDate} ·{" "}
+                  <span className="rounded bg-emerald-100 px-1 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
+                    {c.qualifierTag.replace("_", " ")}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  href={draftUrl}
+                  className="rounded border border-emerald-400 px-2 py-1 text-xs text-emerald-800 hover:bg-emerald-100 dark:border-emerald-600 dark:text-emerald-200 dark:hover:bg-emerald-900"
+                >
+                  Draft close email
+                </Link>
+                <a
+                  href={calUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                >
+                  Schedule call
+                </a>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stream N — Slipped tasks banner
+// ---------------------------------------------------------------------------
+
+function SlippedBanner({ count }: { count: number }): JSX.Element {
+  return (
+    <div
+      role="alert"
+      aria-label="Slipped tasks"
+      className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+    >
+      {/* Red dot */}
+      <span
+        aria-hidden="true"
+        className="inline-block h-2 w-2 shrink-0 rounded-full bg-red-500"
+      />
+      <span>
+        <strong>Needs attention:</strong>{" "}
+        {count === 1
+          ? "1 slipped task"
+          : `${count} slipped tasks`}{" "}
+        (overdue or awaiting response past deadline). Slipped tasks appear at
+        the top of their respective swimlanes below.
+      </span>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Do this first card
+// Priority-shifters banner (Stream Q — SY-014 / W8.2)
+// ---------------------------------------------------------------------------
+// Rendered ABOVE the swimlane grid when ≥1 shifter is detected.
+// Does NOT alter swimlane count — invariant #6 (exactly 5 swimlanes) is
+// preserved because this banner sits outside the swimlane <section>.
+
+const KIND_LABEL: Record<PriorityShifter["kind"], string> = {
+  customer_complaint: "Customer complaint",
+  competitor_mention: "Competitor mention",
+};
+
+function PriorityShiftersBanner({
+  shifters,
+}: {
+  shifters: PriorityShifter[];
+}): JSX.Element {
+  const preview = shifters.slice(0, 3);
+  return (
+    <div
+      role="alert"
+      className="rounded-md border-2 border-red-500 bg-red-50 p-4 dark:border-red-700 dark:bg-red-950"
+    >
+      <header className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-red-800 dark:text-red-200">
+          Priority shift{shifters.length > 1 ? "s" : ""} detected — {shifters.length} alert
+          {shifters.length > 1 ? "s" : ""}
+        </h3>
+        <span className="text-xs uppercase tracking-wide text-red-600 dark:text-red-400">
+          mid-week · review now
+        </span>
+      </header>
+      <ul className="mt-3 space-y-2">
+        {preview.map((s) => (
+          <li key={s.threadId} className="flex flex-col gap-0.5 text-sm">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="rounded bg-red-200 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800 dark:text-red-200">
+                {KIND_LABEL[s.kind]}
+              </span>
+              {s.contactId ? (
+                <Link
+                  href={`/crm/contacts/${s.contactId}`}
+                  className="font-medium text-red-800 hover:underline dark:text-red-200"
+                >
+                  {s.subject || "(no subject)"}
+                </Link>
+              ) : (
+                <span className="font-medium text-red-800 dark:text-red-200">
+                  {s.subject || "(no subject)"}
+                </span>
+              )}
+            </span>
+            {s.snippet && (
+              <span className="pl-1 text-xs text-red-700 line-clamp-1 dark:text-red-300">
+                {s.snippet}
+              </span>
+            )}
+          </li>
+        ))}
+        {shifters.length > 3 && (
+          <li className="text-xs text-red-600 dark:text-red-400">
+            + {shifters.length - 3} more — check your inbox.
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Do this first card (Stream M, US-024 / SY-013, invariant #7)
 // ---------------------------------------------------------------------------
 
 type RowLite = {
