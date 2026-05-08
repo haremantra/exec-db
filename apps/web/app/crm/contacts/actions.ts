@@ -1,7 +1,15 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { schema, type SensitiveFlag, SENSITIVE_FLAG_VALUES } from "@exec-db/db";
+import {
+  schema,
+  type SensitiveFlag,
+  SENSITIVE_FLAG_VALUES,
+  type TriageTag,
+  TRIAGE_TAG_VALUES,
+  type WorkArea,
+  WORK_AREA_VALUES,
+} from "@exec-db/db";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -765,4 +773,40 @@ export async function saveDraftToGmailConfirmed(
   );
 
   revalidatePath(`/crm/contacts/${contactId}`);
+}
+
+// ── I1: setTriageTag ──────────────────────────────────────────────────────────
+export async function setTriageTag(contactId: string, formData: FormData): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: setTriageTag requires exec_all tier");
+  }
+  const raw = String(formData.get("triageTag") ?? "").trim();
+  const tag: TriageTag | null = raw === "" || raw === "none" ? null : (raw as TriageTag);
+  if (tag !== null && !(TRIAGE_TAG_VALUES as readonly string[]).includes(tag)) {
+    throw new Error(`Invalid triage tag value: "${tag}"`);
+  }
+  await query(ctx(session), (tx) =>
+    tx.update(schema.contact).set({ triageTag: tag, updatedAt: new Date() }).where(eq(schema.contact.id, contactId)),
+  );
+  revalidatePath(`/crm/contacts/${contactId}`);
+  revalidatePath("/crm/contacts");
+}
+
+// ── I3: setWorkArea ───────────────────────────────────────────────────────────
+export async function setWorkArea(contactId: string, formData: FormData): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: setWorkArea requires exec_all tier");
+  }
+  const raw = String(formData.get("workArea") ?? "").trim();
+  const area: WorkArea | null = raw === "" || raw === "none" ? null : (raw as WorkArea);
+  if (area !== null && !(WORK_AREA_VALUES as readonly string[]).includes(area)) {
+    throw new Error(`Invalid work area value: "${area}"`);
+  }
+  await query(ctx(session), (tx) =>
+    tx.update(schema.contact).set({ workArea: area, updatedAt: new Date() }).where(eq(schema.contact.id, contactId)),
+  );
+  revalidatePath(`/crm/contacts/${contactId}`);
+  revalidatePath("/crm/contacts");
 }

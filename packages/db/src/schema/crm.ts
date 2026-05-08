@@ -49,6 +49,38 @@ export const SENSITIVE_FLAG_VALUES = [
 
 export type SensitiveFlag = (typeof SENSITIVE_FLAG_VALUES)[number];
 
+/**
+ * Triage-tag taxonomy (I1 — US-007, W2.5).
+ * Captures the exec's weekly follow-up triage rule: can I help them, can they
+ * help me, or are they a pilot candidate?
+ * Null means no triage tag has been assigned.
+ * Only exec_all tier can set or clear this tag.
+ */
+export const TRIAGE_TAG_VALUES = [
+  "can_help_them",
+  "can_help_me",
+  "pilot_candidate",
+] as const;
+
+export type TriageTag = (typeof TRIAGE_TAG_VALUES)[number];
+
+/**
+ * Work-area taxonomy (I3 — US-001, W1.1).
+ * Tags a contact (or task) with the exec's operational work area so that the
+ * Monday view can group by function.  Null means no work area is assigned.
+ */
+export const WORK_AREA_VALUES = [
+  "prospecting",
+  "customer",
+  "investor",
+  "contractor",
+  "board",
+  "thought_leadership",
+  "admin",
+] as const;
+
+export type WorkArea = (typeof WORK_AREA_VALUES)[number];
+
 export const contact = crm.table(
   "contact",
   {
@@ -67,12 +99,11 @@ export const contact = crm.table(
      * separately in packages/db/src/rls/policies.sql (see migration note).
      */
     sensitiveFlag: varchar("sensitive_flag", { length: 32 }),
-    /**
-     * Draft flag (G1/G4 — US-005, SY-001).
-     * true  → contact was auto-created from a LinkedIn URL or email intake
-     *         and awaits exec confirmation ("needs review").
-     * false → exec-confirmed; never overwritten by auto-create logic.
-     */
+    /** Triage tag (I1 — US-007, W2.5). NULL = untagged. */
+    triageTag: varchar("triage_tag", { length: 32 }),
+    /** Work-area tag (I3 — US-001, W1.1). NULL = untagged. */
+    workArea: varchar("work_area", { length: 32 }),
+    /** Draft flag (G — US-005, SY-001). */
     isDraft: boolean("is_draft").notNull().default(false),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -95,6 +126,28 @@ export const contact = crm.table(
         'loi',
         'vc_outreach',
         'partnership'
+      )`,
+    ),
+    // CHECK constraint mirrors TRIAGE_TAG_VALUES; keep in sync.
+    check(
+      "contact_triage_tag_chk",
+      sql`${t.triageTag} IS NULL OR ${t.triageTag} IN (
+        'can_help_them',
+        'can_help_me',
+        'pilot_candidate'
+      )`,
+    ),
+    // CHECK constraint mirrors WORK_AREA_VALUES; keep in sync.
+    check(
+      "contact_work_area_chk",
+      sql`${t.workArea} IS NULL OR ${t.workArea} IN (
+        'prospecting',
+        'customer',
+        'investor',
+        'contractor',
+        'board',
+        'thought_leadership',
+        'admin'
       )`,
     ),
   ],
