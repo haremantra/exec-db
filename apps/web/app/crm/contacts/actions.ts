@@ -1,6 +1,14 @@
 "use server";
 
-import { schema, type SensitiveFlag, SENSITIVE_FLAG_VALUES } from "@exec-db/db";
+import {
+  schema,
+  type SensitiveFlag,
+  SENSITIVE_FLAG_VALUES,
+  type TriageTag,
+  TRIAGE_TAG_VALUES,
+  type WorkArea,
+  WORK_AREA_VALUES,
+} from "@exec-db/db";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -9,8 +17,8 @@ import { query } from "@/lib/db";
 import { recordAccess } from "@/lib/audit";
 
 // Re-export so UI layers can import from one place.
-export type { SensitiveFlag };
-export { SENSITIVE_FLAG_VALUES };
+export type { SensitiveFlag, TriageTag, WorkArea };
+export { SENSITIVE_FLAG_VALUES, TRIAGE_TAG_VALUES, WORK_AREA_VALUES };
 
 function ctx(session: Awaited<ReturnType<typeof getSession>>) {
   if (!session) throw new Error("Unauthorized");
@@ -177,4 +185,80 @@ export async function setSensitiveFlag(
   });
 
   revalidatePath(`/crm/contacts/${contactId}`);
+}
+
+/**
+ * Set or clear the triage tag on a contact (I1 — US-007, W2.5).
+ *
+ * Designed to be called via `.bind(null, contactId)` from a form action.
+ * Only exec_all tier can call this action.
+ *
+ * @param contactId  UUID of the contact to update (bound argument).
+ * @param formData   Form data; `triageTag` field: one of TRIAGE_TAG_VALUES or "none".
+ */
+export async function setTriageTag(
+  contactId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: setTriageTag requires exec_all tier");
+  }
+
+  const raw = String(formData.get("triageTag") ?? "").trim();
+  const tag: TriageTag | null =
+    raw === "" || raw === "none" ? null : (raw as TriageTag);
+
+  if (tag !== null && !(TRIAGE_TAG_VALUES as readonly string[]).includes(tag)) {
+    throw new Error(`Invalid triage tag value: "${tag}"`);
+  }
+
+  await query(ctx(session), (tx) =>
+    tx
+      .update(schema.contact)
+      .set({ triageTag: tag, updatedAt: new Date() })
+      .where(eq(schema.contact.id, contactId)),
+  );
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+  revalidatePath("/crm/contacts");
+}
+
+/**
+ * Set or clear the work-area tag on a contact (I3 — US-001, W1.1).
+ *
+ * Designed to be called via `.bind(null, contactId)` from a form action.
+ * Only exec_all tier can call this action.
+ *
+ * @param contactId  UUID of the contact to update (bound argument).
+ * @param formData   Form data; `workArea` field: one of WORK_AREA_VALUES or "none".
+ */
+export async function setWorkArea(
+  contactId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: setWorkArea requires exec_all tier");
+  }
+
+  const raw = String(formData.get("workArea") ?? "").trim();
+  const area: WorkArea | null =
+    raw === "" || raw === "none" ? null : (raw as WorkArea);
+
+  if (area !== null && !(WORK_AREA_VALUES as readonly string[]).includes(area)) {
+    throw new Error(`Invalid work area value: "${area}"`);
+  }
+
+  await query(ctx(session), (tx) =>
+    tx
+      .update(schema.contact)
+      .set({ workArea: area, updatedAt: new Date() })
+      .where(eq(schema.contact.id, contactId)),
+  );
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+  revalidatePath("/crm/contacts");
 }

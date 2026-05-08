@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   date,
   index,
   integer,
@@ -45,6 +46,19 @@ export const task = pm.table(
     priority: smallint("priority").notNull().default(5),
     dueDate: date("due_date"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * Work-area tag (I3 — US-001, W1.1).
+     * Groups the task by the exec's operational work area so the Monday
+     * dashboard can render swimlanes by function.  NULL means untagged.
+     *
+     * Migration SQL:
+     *   ALTER TABLE pm.task ADD COLUMN work_area varchar(32);
+     *   ALTER TABLE pm.task ADD CONSTRAINT task_work_area_chk
+     *     CHECK (work_area IS NULL OR work_area IN
+     *       ('prospecting','customer','investor','contractor',
+     *        'board','thought_leadership','admin'));
+     */
+    workArea: varchar("work_area", { length: 32 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`now()`),
@@ -55,6 +69,19 @@ export const task = pm.table(
   (t) => [
     index("task_owner_idx").on(t.ownerId, t.status, t.dueDate),
     index("task_project_idx").on(t.projectId, t.status),
+    // CHECK constraint mirrors WORK_AREA_VALUES in crm.ts; keep in sync.
+    check(
+      "task_work_area_chk",
+      sql`${t.workArea} IS NULL OR ${t.workArea} IN (
+        'prospecting',
+        'customer',
+        'investor',
+        'contractor',
+        'board',
+        'thought_leadership',
+        'admin'
+      )`,
+    ),
   ],
 );
 
