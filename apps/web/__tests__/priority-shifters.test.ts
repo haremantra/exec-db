@@ -319,11 +319,11 @@ describe("Invariant #6 — 5-swimlane invariant (static guard)", () => {
     const src = await fs.readFile(filePath, "utf8");
 
     const swimlanes = [
-      "prospects-followup",
-      "inbox-progress",
+      "prospects_followup",
+      "inbox_progress",
       "admin",
-      "thought-leadership",
-      "product-roadmap",
+      "thought_leadership",
+      "product_roadmap",
     ];
 
     for (const lane of swimlanes) {
