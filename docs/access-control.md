@@ -199,6 +199,39 @@ Google API calls. `googleClientForUser()` always selects the row with
 `gmail.send` is **never requested** and **never called**. CI lint (stream J)
 blocks any future introduction of `users.messages.send`.
 
+## Offboarding / personal export (US-026 / AD-006 / PR3-S)
+
+An `exec_all` user may export their entire CRM as a portable zip archive via
+`GET /api/export/crm` or the **Settings → Export** page.
+
+### What is included
+
+- One JSON file per CRM/PM table: `contact.json`, `account.json`,
+  `call_note.json`, `draft.json`, `calendar_event.json`,
+  `email_thread.json`, `project.json`, `task.json`.
+- One `.md` file per call note inside a `notes/` folder, with YAML
+  frontmatter (contact name, `contact_id`, `occurred_at`, `author_id`,
+  `is_starred`) followed by the note body in markdown.
+- **Sensitive contacts are included** — this is the exec's own data.
+  The exec is not exporting data belonging to others; they are exporting
+  their own CRM records before offboarding.
+
+### Rate limit
+
+One successful export per user per **24 hours**. The limit is enforced by
+querying `audit.access_log` for rows with `intent LIKE 'crm_export%'` in
+the last 24h for the requesting user.  Exceeding the limit returns HTTP 429.
+
+### Audit log
+
+Every successful export writes a row to `audit.access_log` with:
+- `action = 'EXPORT'`
+- `intent = 'crm_export userId=<id> file=<filename>'`
+- `metadata` containing `filename`, `userId`, and `exportedAt` timestamp.
+
+Non-exec roles (function_lead, manager, assistant, employee) cannot access
+the export endpoint and will receive HTTP 403.
+
 ## SOC 2 alignment
 
 The above plus: change management on `packages/db` migrations (PR + review + audit), backup PITR with monthly restore drill, and a sub-processor list checked into `docs/`. Cheap to do from day one; expensive to retrofit.
