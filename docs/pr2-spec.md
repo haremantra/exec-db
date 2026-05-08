@@ -196,6 +196,8 @@ PR2 ships when **all** of the following are true:
 
 Before any code lands on `claude/pr2-foundation`:
 
-- [ ] User confirms scope or asks for trims/adds.
-- [ ] Hard prereqs P1–P4 are complete (admin work).
-- [ ] User picks initial commit order (default proposed above).
+- [x] **User confirms scope** — accepted as-is on 2026-05-08.
+- [ ] Hard prereqs P1–P4 are complete (admin work — runs `docs/pr2-prereqs-runbook.md`).
+- [x] **Initial commit order** — default accepted: D → E → A → C → B → F → G → H → I → J.
+
+Code starts on `claude/pr2-foundation` once the prereqs checkbox flips to `[x]`.
