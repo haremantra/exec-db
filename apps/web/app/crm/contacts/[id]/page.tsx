@@ -10,9 +10,13 @@ import {
   discardDraft,
   updateCallNote,
   setSensitiveFlag,
+  generateAutodraft,
+  saveDraftToGmail,
+  saveDraftToGmailConfirmed,
   SENSITIVE_FLAG_VALUES,
+  AUTODRAFT_TONE_VALUES,
 } from "../actions";
-import type { SensitiveFlag } from "../actions";
+import type { SensitiveFlag, AutodraftTone, DraftCitation } from "../actions";
 
 const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -98,6 +102,40 @@ export default async function ContactDetailPage({
   const canWrite = session.tier === "exec_all";
   const addNote = addCallNote.bind(null, id);
   const setFlag = setSensitiveFlag.bind(null, id);
+
+  /** Human-readable tone labels for the selector (SY-007). */
+  const TONE_LABELS: Record<AutodraftTone, string> = {
+    "founder-concise": "Founder-style concise (default)",
+    "formal-executive": "Formal executive",
+    "warm-sales-followup": "Warm sales follow-up",
+  };
+
+  /**
+   * Parse citations JSON stored in the draft.
+   * The draft row doesn't have a dedicated citations column yet, so we
+   * embed them as a JSON comment at the end of body_markdown:
+   * <!-- citations: [...] -->
+   * This avoids a schema change in Stream B.
+   */
+  function parseCitations(bodyMarkdown: string | null): DraftCitation[] {
+    if (!bodyMarkdown) return [];
+    const match = bodyMarkdown.match(/<!--\s*citations:\s*(\[.*?\])\s*-->/s);
+    if (!match || !match[1]) return [];
+    try {
+      return JSON.parse(match[1]) as DraftCitation[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Strip the embedded citations comment from the body before rendering
+   * so the exec doesn't see raw JSON in the draft preview.
+   */
+  function stripCitationsComment(bodyMarkdown: string | null): string {
+    if (!bodyMarkdown) return "";
+    return bodyMarkdown.replace(/\s*<!--\s*citations:\s*\[.*?\]\s*-->\s*$/s, "");
+  }
 
   /** Human-readable label for each sensitive-flag value. */
   const SENSITIVE_FLAG_LABELS: Record<SensitiveFlag, string> = {
@@ -261,32 +299,143 @@ export default async function ContactDetailPage({
         </p>
       </header>
 
+      {/* ── Autodraft generation form (B2: tone selector + generate button) ── */}
+      {canWrite && (
+        <section>
+          <h3 className="mb-2 text-sm font-medium">Generate follow-up draft</h3>
+          <form
+            action={generateAutodraft.bind(null, id)}
+            className="flex items-center gap-3 flex-wrap"
+          >
+            {/* Tone selector — SY-007 / S3.4 */}
+            <label className="text-xs text-neutral-600 dark:text-neutral-400">
+              Tone
+            </label>
+            <select
+              name="tone"
+              defaultValue="founder-concise"
+              className="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            >
+              {AUTODRAFT_TONE_VALUES.map((t: AutodraftTone) => (
+                <option key={t} value={t}>
+                  {TONE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
+            >
+              Generate draft
+            </button>
+          </form>
+        </section>
+      )}
+
+      {/* ── Structured draft review UI (B5) ── */}
       {data.drafts.length > 0 && (
         <section>
           <h3 className="mb-2 text-sm font-medium">Drafts pending review</h3>
-          <ul className="space-y-3">
-            {data.drafts.map((d) => (
-              <li
-                key={d.id}
-                className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950"
-              >
-                <div className="mb-1 font-medium">{d.subject ?? "(no subject)"}</div>
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(d.bodyMarkdown) }}
-                />
-                {canWrite && (
-                  <form action={discardDraft.bind(null, d.id, id)} className="mt-2">
-                    <button
-                      type="submit"
-                      className="text-xs text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-300"
-                    >
-                      Discard
-                    </button>
-                  </form>
-                )}
-              </li>
-            ))}
+          <ul className="space-y-4">
+            {data.drafts.map((d) => {
+              const citations = parseCitations(d.bodyMarkdown);
+              const bodyForRender = stripCitationsComment(d.bodyMarkdown);
+              return (
+                <li
+                  key={d.id}
+                  className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-700 dark:bg-amber-950"
+                >
+                  {/* Subject */}
+                  <div className="mb-2 font-medium text-base">
+                    {d.subject ?? "(no subject)"}
+                  </div>
+
+                  {/* Body — structured markdown (SY-005) */}
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(bodyForRender) }}
+                  />
+
+                  {/* Citations footnotes (SY-006) */}
+                  {citations.length > 0 && (
+                    <div className="mt-3 border-t border-amber-200 pt-2 dark:border-amber-800">
+                      <p className="text-xs font-medium text-neutral-500 mb-1">
+                        Sources cited:
+                      </p>
+                      <ul className="flex flex-wrap gap-2">
+                        {citations.map((c: DraftCitation) => (
+                          <li key={c.markerId}>
+                            <a
+                              href={
+                                c.type === "note"
+                                  ? `#note-${c.noteOrThreadId}`
+                                  : `#thread-${c.noteOrThreadId}`
+                              }
+                              className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-200"
+                            >
+                              {c.markerId}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  {canWrite && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      {/* Save to Gmail Drafts */}
+                      <form
+                        action={saveDraftToGmail.bind(null, d.id, id)}
+                        className="flex items-center gap-2"
+                      >
+                        <input
+                          type="hidden"
+                          name="to"
+                          value={data.contact.primaryEmail}
+                        />
+                        <button
+                          type="submit"
+                          className="rounded bg-blue-700 px-3 py-1.5 text-xs text-white hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700"
+                        >
+                          Save to Gmail Drafts
+                        </button>
+                      </form>
+
+                      {/* Confirmed override (shown alongside normal save for simplicity;
+                          in production the UI would swap buttons after a guard error) */}
+                      <form
+                        action={saveDraftToGmailConfirmed.bind(null, d.id, id)}
+                        className="flex items-center gap-2"
+                      >
+                        <input
+                          type="hidden"
+                          name="to"
+                          value={data.contact.primaryEmail}
+                        />
+                        <button
+                          type="submit"
+                          className="rounded border border-orange-400 px-3 py-1.5 text-xs text-orange-700 hover:bg-orange-50 dark:border-orange-600 dark:text-orange-400"
+                          title="Bypasses the confidential-content guard. Use only after reviewing for sensitive data."
+                        >
+                          I confirm this is safe — save anyway
+                        </button>
+                      </form>
+
+                      {/* Discard */}
+                      <form action={discardDraft.bind(null, d.id, id)}>
+                        <button
+                          type="submit"
+                          className="text-xs text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-300"
+                        >
+                          Discard
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -408,6 +557,25 @@ export default async function ContactDetailPage({
                     className="prose prose-sm dark:prose-invert max-w-none"
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(n.markdown) }}
                   />
+                )}
+
+                {/* B6: "Generate follow-up" button on each call note (US-012) */}
+                {canWrite && !isEditing && (
+                  <form
+                    action={generateAutodraft.bind(null, id)}
+                    className="mt-2 flex items-center gap-2"
+                  >
+                    {/* sourceNoteId is informational — the action uses getContactContext
+                        which retrieves the 5 most recent notes anyway (including this one). */}
+                    <input type="hidden" name="sourceNoteId" value={n.id} />
+                    <input type="hidden" name="tone" value="founder-concise" />
+                    <button
+                      type="submit"
+                      className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:border-neutral-500 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-neutral-500"
+                    >
+                      Generate follow-up
+                    </button>
+                  </form>
                 )}
               </li>
             );
