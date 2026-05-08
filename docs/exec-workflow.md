@@ -66,10 +66,10 @@ _Last updated: 2026-05-07_
 - **W8.4** how you score yourself: weekly review of to-do list and jobs-to-be-done completed.
 
 ## I. Pain points and dream state
-- **W9.1** worst workflow moment last month: _unanswered_
-- **W9.2** magic Tuesday morning: _unanswered_
-- **W9.3** delete-after-a-week trigger: _unanswered_
-- **W9.4** recommend-to-another-exec trigger: _unanswered_
+- **W9.1** worst workflow moment last month: losing track of prospecting and marketing strategy goals.
+- **W9.2** magic Tuesday morning: Tuesday morning is not about meetings but about lining up sales to close.
+- **W9.3** delete-after-a-week trigger: if the effort is friction and there's no change in my practices for working through a day organized with predictability.
+- **W9.4** recommend-to-another-exec trigger: "I do not miss obligations or opportunities."
 
 ## J. Permissions, privacy, boundaries
 - **W10.1** never-leaves-laptop data: _unanswered_
