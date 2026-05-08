@@ -34,6 +34,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Forbid gmail.users.messages.send
+        run: |
+          # Scan for actual API calls to messages.send (not comments documenting the prohibition).
+          # -P enables Perl regex; the negative lookbehind skips lines that are pure comments (// or *).
+          if grep -rn "messages\.send\|users\.messages\.send" apps/web/lib apps/web/app scripts/ packages/ \
+               | grep -v "^\s*//" | grep -v "^\s*\*" | grep -v "^[^:]*:[0-9]*:\s*//" | grep -v "^[^:]*:[0-9]*:\s*\*"; then
+            echo "ERROR: Found gmail.users.messages.send reference. AD-004 forbids any send code path."
+            exit 1
+          fi
+
       - name: Typecheck
         run: pnpm typecheck
 

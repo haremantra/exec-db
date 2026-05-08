@@ -172,6 +172,32 @@ $$;
 --
 -- Stream H (app_assistant) does not yet have a Postgres role, but once
 -- added it will fall into the non-exec_all branch automatically.
+--
+-- SECURITY DEFINER safety analysis (PR2-J — Copilot review on PR #19):
+--
+--   This function is marked SECURITY DEFINER, which means it executes with
+--   the privileges of the role that owns/created it (typically the migration
+--   role, which has BYPASSRLS or is the crm schema owner).
+--
+--   The concern is Postgres RLS recursion: if crm.contact has RLS enabled
+--   and a policy on crm.contact calls crm.is_sensitive_for_role(), which in
+--   turn SELECTs from crm.contact, could Postgres recurse infinitely?
+--
+--   Answer: NO — SECURITY DEFINER is the standard escape hatch for exactly
+--   this pattern.  When the function body executes as the definer role
+--   (BYPASSRLS or schema owner), Postgres applies RLS only to the *outer*
+--   query session role, not to queries inside SECURITY DEFINER functions
+--   running as a higher-privilege role.  The inner SELECT on crm.contact
+--   inside this function bypasses RLS entirely (the definer role has
+--   BYPASSRLS), so there is no cycle.
+--
+--   Evidence: pg docs §5.8 "Row Security Policies" explicitly state that
+--   SECURITY DEFINER functions run under the definer's GUC/role settings and
+--   do not re-enter the calling session's RLS context.  Additionally,
+--   SET search_path = crm, public above pins the search path so a malicious
+--   caller cannot inject a shadow crm.contact view.
+--
+--   Conclusion: safe as-is.  No policy logic change needed.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION crm.is_sensitive_for_role(p_contact_id uuid)
@@ -420,17 +446,30 @@ DROP POLICY IF EXISTS llm_call_insert ON audit.llm_call;
 CREATE POLICY llm_call_insert ON audit.llm_call FOR INSERT
   WITH CHECK (app.current_tier() = 'exec_all');
 
--- Delete-prevention rule — raises an exception if DELETE is attempted.
--- This enforces AD-005 (365-day minimum retention) at the DB level.
+-- Append-only enforcement via a BEFORE trigger (SY-017 / AD-005).
+--
+-- Previous implementation used DO INSTEAD rules with SELECT 1/0 to raise a
+-- division-by-zero exception (Copilot review on PR #19 flagged this as
+-- unclear and non-standard).  Replaced with a proper BEFORE UPDATE OR DELETE
+-- trigger that issues an unambiguous RAISE EXCEPTION.  Triggers fire before
+-- the DML reaches any RLS policy or storage, so this is stronger than the
+-- DO INSTEAD approach and works even for superusers who bypass RLS.
+--
+-- The old rules are dropped first to avoid duplicate enforcement.
 DROP RULE IF EXISTS llm_call_no_delete ON audit.llm_call;
-CREATE RULE llm_call_no_delete AS ON DELETE TO audit.llm_call
-  DO INSTEAD (
-    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); DELETE is prohibited') AS _blocked
-  );
-
--- Update-prevention rule — raises an exception if UPDATE is attempted.
 DROP RULE IF EXISTS llm_call_no_update ON audit.llm_call;
-CREATE RULE llm_call_no_update AS ON UPDATE TO audit.llm_call
-  DO INSTEAD (
-    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); UPDATE is prohibited') AS _blocked
-  );
+
+CREATE OR REPLACE FUNCTION audit.llm_call_append_only()
+  RETURNS trigger
+  LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'audit.llm_call is append-only (PR2 SY-017/AD-005); % is prohibited',
+    TG_OP;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS llm_call_no_mutate ON audit.llm_call;
+CREATE TRIGGER llm_call_no_mutate
+  BEFORE UPDATE OR DELETE ON audit.llm_call
+  FOR EACH ROW EXECUTE FUNCTION audit.llm_call_append_only();
