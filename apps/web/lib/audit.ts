@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { Session } from "./rbac.js";
 
 export type AuditEntry = {
-  schemaName: "core" | "hr" | "comp" | "fin" | "legal" | "ops";
+  schemaName: "core" | "hr" | "comp" | "fin" | "legal" | "ops" | "crm" | "pm";
   tableName: string;
   action: "SELECT" | "EXPORT" | "INSERT" | "UPDATE" | "DELETE";
   intent: string;

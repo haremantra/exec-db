@@ -76,7 +76,7 @@ The autodraft subsystem generates structured follow-up email drafts from call no
    │
    ├─ Parse JSON output → { subject, body_markdown, citations }
    │
-   └─ INSERT crm.draft (status="pending", promptHash=sha256(redacted_prompt))
+   └─ INSERT crm.draft (status="pending", promptHash=sha256(assembled-prompt) — pre-redaction; redaction itself happens inside safeAnthropic)
       ▲ NOT saved to Gmail yet — pending exec review
 ```
 

@@ -284,8 +284,8 @@ export async function setSensitiveFlag(
     // Audit log: record this sensitive-flag mutation so it is visible in
     // audit.access_log (defense-in-depth; see docs/access-control.md).
     await recordAccess(tx, session, {
-      schemaName: "core",  // crm is not in the existing AuditEntry union; use "core" as proxy.
-      tableName: "crm.contact",
+      schemaName: "crm",
+      tableName: "contact",
       action: "UPDATE",
       intent: `setSensitiveFlag contactId=${contactId} flag=${flag ?? "null"}`,
       metadata: { contactId, sensitiveFlag: flag },
@@ -457,7 +457,7 @@ function sha256hex(text: string): string {
 export async function generateAutodraft(
   contactId: string,
   formData: FormData,
-): Promise<string> {
+): Promise<void> {
   const session = await getSession();
   if (!session) throw new Error("Unauthorized");
 
@@ -518,10 +518,12 @@ export async function generateAutodraft(
       .trim();
     parsed = JSON.parse(cleaned) as AutodraftOutput;
   } catch {
+    // Do NOT include LLM output in the error message — it may carry sensitive
+    // content even after redaction. Use a deterministic correlation id (the
+    // hash of the redacted prompt) so the audit log can be cross-referenced.
+    const correlationId = sha256hex(prompt).slice(0, 16);
     throw new Error(
-      "generateAutodraft: LLM returned non-JSON output. " +
-        "Raw response (first 200 chars): " +
-        result.text.slice(0, 200),
+      `generateAutodraft: LLM returned non-JSON output. correlationId=${correlationId} (see audit.llm_call)`,
     );
   }
 
@@ -532,8 +534,19 @@ export async function generateAutodraft(
     );
   }
 
-  // Compute prompt hash for the draft row (sha256 of the redacted prompt).
+  // Compute prompt hash for the draft row.
+  // Note: `prompt` here is the assembled prompt BEFORE redaction. Redaction
+  // happens inside `safeAnthropic`. We hash the pre-redaction string because
+  // we don't have access to the post-redaction text from the wrapper. Documented
+  // as such in `docs/architecture.md` (Autodraft section).
   const promptHash = sha256hex(prompt).slice(0, 64);
+
+  // Persist citations alongside the body so the UI can render footnote chips.
+  // Embedded as an HTML comment to avoid a schema migration (see PR3 todo:
+  // promote to a dedicated jsonb column).
+  const citationsJson = JSON.stringify(parsed.citations ?? []);
+  const bodyWithCitations =
+    `${parsed.body_markdown}\n\n<!-- citations: ${citationsJson} -->`;
 
   // Insert draft row (status="pending"; NOT saved to Gmail yet).
   const draftId = await query(
@@ -544,7 +557,7 @@ export async function generateAutodraft(
         .values({
           contactId,
           subject: parsed.subject,
-          bodyMarkdown: parsed.body_markdown,
+          bodyMarkdown: bodyWithCitations,
           modelId: model,
           promptHash,
           status: "pending",
@@ -559,7 +572,6 @@ export async function generateAutodraft(
   }
 
   revalidatePath(`/crm/contacts/${contactId}`);
-  return draftId;
 }
 
 // ── B5: saveDraftToGmail ──────────────────────────────────────────────────────
@@ -622,14 +634,19 @@ export async function saveDraftToGmail(
     to,
     subject: draft.subject ?? "",
     bodyMarkdown: draft.bodyMarkdown ?? "",
-    threadId,
+    ...(threadId ? { threadId } : {}),
   });
-  // The real google-gmail.ts returns { draftId }; our stub returns { gmailDraftId }.
-  // Support both shapes for compatibility during the stream A/B merge window.
+  // Stream A's createGmailDraft returns { draftId }. Require a non-empty id —
+  // do NOT mark a row "saved_to_gmail" without proof of a Gmail draft existing.
   const resolvedDraftId =
     (createResult as { draftId?: string; gmailDraftId?: string }).draftId ??
     (createResult as { draftId?: string; gmailDraftId?: string }).gmailDraftId ??
     null;
+  if (!resolvedDraftId) {
+    throw new Error(
+      `saveDraftToGmail: createGmailDraft returned no draft id for draftId=${draftId}; refusing to mark as saved.`,
+    );
+  }
 
   // Update draft status.
   await query(
@@ -690,14 +707,19 @@ export async function saveDraftToGmailConfirmed(
   );
 
   if (!draft) throw new Error(`Draft not found: ${draftId}`);
+  if (draft.status !== "pending") {
+    throw new Error(
+      `saveDraftToGmailConfirmed: draft ${draftId} is not pending (status="${draft.status}").`,
+    );
+  }
 
   // Log the confidential-content guard override to audit.access_log.
   await query(
     { userId: session.userId, tier: session.tier, functionArea: session.functionArea },
     async (tx) => {
       await recordAccess(tx, session, {
-        schemaName: "core",
-        tableName: "crm.draft",
+        schemaName: "crm",
+        tableName: "draft",
         action: "UPDATE",
         intent: `saveDraftToGmailConfirmed: exec confirmed confidential-content override for draftId=${draftId} contactId=${contactId}`,
         metadata: {
@@ -714,14 +736,17 @@ export async function saveDraftToGmailConfirmed(
     to,
     subject: draft.subject ?? "",
     bodyMarkdown: draft.bodyMarkdown ?? "",
-    threadId,
+    ...(threadId ? { threadId } : {}),
   });
-  // The real google-gmail.ts returns { draftId }; our stub returns { gmailDraftId }.
-  // Support both shapes for compatibility during the stream A/B merge window.
   const resolvedDraftId =
     (createResult as { draftId?: string; gmailDraftId?: string }).draftId ??
     (createResult as { draftId?: string; gmailDraftId?: string }).gmailDraftId ??
     null;
+  if (!resolvedDraftId) {
+    throw new Error(
+      `saveDraftToGmailConfirmed: createGmailDraft returned no draft id for draftId=${draftId}; refusing to mark as saved.`,
+    );
+  }
 
   // Update draft status.
   await query(

@@ -1,7 +1,7 @@
 /**
  * autodraft.test.ts — Vitest suite for Stream B autodraft deliverables.
  *
- * Covers (12–15 tests):
+ * Covers 19 tests across 5 groups:
  *  1. generateAutodraft produces a draft row with structured body_markdown and citations.
  *  2. Cross-pollination guard: the prompt sent to safeAnthropic references ONLY
  *     the provided contactId (AD-008 / SY-008).
@@ -327,9 +327,8 @@ describe("generateAutodraft (B1–B4)", () => {
     const fd = new FormData();
     fd.set("tone", "founder-concise");
 
-    const draftId = await generateAutodraft(CONTACT_A, fd);
+    await generateAutodraft(CONTACT_A, fd);
 
-    expect(draftId).toBe(DRAFT_ID);
     expect(dbInserts).toHaveLength(1);
     const insert = dbInserts[0]!;
     expect(insert.table).toContain("draft");
@@ -339,6 +338,8 @@ describe("generateAutodraft (B1–B4)", () => {
     expect(values.bodyMarkdown).toContain("## Recap");
     expect(values.bodyMarkdown).toContain("## Owners + dates");
     expect(values.bodyMarkdown).toContain("## Next step");
+    // Citations are persisted as an HTML comment so the UI can render chips.
+    expect(values.bodyMarkdown).toContain("<!-- citations:");
   });
 
   it("TEST-2: the prompt sent to safeAnthropic references ONLY the provided contactId", async () => {
