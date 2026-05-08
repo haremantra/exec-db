@@ -4,6 +4,10 @@ import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { rankTasks, type RankerTask, type RankingResult } from "@/lib/ranker";
+import {
+  detectPriorityShifters,
+  type PriorityShifter,
+} from "@/lib/priority-shifters";
 import { disagreeWithRanker } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -67,13 +71,22 @@ export default async function DashboardPage(): Promise<JSX.Element> {
     status: r.status,
   }));
 
-  const ranking = await rankTasks(candidates, session);
+  // Run ranker and priority-shifter detection concurrently.
+  const [ranking, shifters] = await Promise.all([
+    rankTasks(candidates, session),
+    detectPriorityShifters(session),
+  ]);
 
   // Map rows by id for the card UI.
   const byId = new Map(rows.map((r) => [r.id, r] as const));
 
   return (
     <div className="space-y-8">
+      {/* Q: Priority-shifters banner — OUTSIDE swimlane grid (invariant #6 preserved). */}
+      {shifters.length > 0 && (
+        <PriorityShiftersBanner shifters={shifters} />
+      )}
+
       <header className="flex items-baseline justify-between">
         <h2 className="text-base font-medium">Monday — what matters this week</h2>
         <span className="text-xs text-neutral-500">
@@ -91,6 +104,75 @@ export default async function DashboardPage(): Promise<JSX.Element> {
         Swimlanes will be rendered by Stream L. This dashboard route is shared
         between L (layout) and M (this card).
       </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Priority-shifters banner (Stream Q — SY-014 / W8.2)
+// ---------------------------------------------------------------------------
+// Rendered ABOVE the swimlane grid when ≥1 shifter is detected.
+// Does NOT alter swimlane count — invariant #6 (exactly 5 swimlanes) is
+// preserved because this banner sits outside the swimlane <section>.
+
+const KIND_LABEL: Record<PriorityShifter["kind"], string> = {
+  customer_complaint: "Customer complaint",
+  competitor_mention: "Competitor mention",
+};
+
+function PriorityShiftersBanner({
+  shifters,
+}: {
+  shifters: PriorityShifter[];
+}): JSX.Element {
+  const preview = shifters.slice(0, 3);
+  return (
+    <div
+      role="alert"
+      className="rounded-md border-2 border-red-500 bg-red-50 p-4 dark:border-red-700 dark:bg-red-950"
+    >
+      <header className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-red-800 dark:text-red-200">
+          Priority shift{shifters.length > 1 ? "s" : ""} detected — {shifters.length} alert
+          {shifters.length > 1 ? "s" : ""}
+        </h3>
+        <span className="text-xs uppercase tracking-wide text-red-600 dark:text-red-400">
+          mid-week · review now
+        </span>
+      </header>
+      <ul className="mt-3 space-y-2">
+        {preview.map((s) => (
+          <li key={s.threadId} className="flex flex-col gap-0.5 text-sm">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="rounded bg-red-200 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-800 dark:text-red-200">
+                {KIND_LABEL[s.kind]}
+              </span>
+              {s.contactId ? (
+                <Link
+                  href={`/crm/contacts/${s.contactId}`}
+                  className="font-medium text-red-800 hover:underline dark:text-red-200"
+                >
+                  {s.subject || "(no subject)"}
+                </Link>
+              ) : (
+                <span className="font-medium text-red-800 dark:text-red-200">
+                  {s.subject || "(no subject)"}
+                </span>
+              )}
+            </span>
+            {s.snippet && (
+              <span className="pl-1 text-xs text-red-700 line-clamp-1 dark:text-red-300">
+                {s.snippet}
+              </span>
+            )}
+          </li>
+        ))}
+        {shifters.length > 3 && (
+          <li className="text-xs text-red-600 dark:text-red-400">
+            + {shifters.length - 3} more — check your inbox.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }

@@ -23,6 +23,10 @@
 import { and, eq, gt, inArray, not, sql } from "drizzle-orm";
 import { schema } from "@exec-db/db";
 import { query } from "@/lib/db";
+import {
+  detectPriorityShifters,
+  type PriorityShifter,
+} from "@/lib/priority-shifters";
 
 export interface DigestBodyResult {
   subject: string;
@@ -131,6 +135,17 @@ export async function assembleDigestBody(
   const activeTasks = tasks.filter((t) => t.status !== "done");
   const recentlyDone = tasks.filter((t) => t.status === "done");
 
+  // --- Detect priority shifters ---
+  // Daily: look back 24 hours. Weekly: look back 7 days (the default window).
+  const sessionCtx = { userId, tier: "exec_all" as const, functionArea: null };
+  const shifters =
+    cadence === "daily"
+      ? await detectPriorityShifters(sessionCtx, {
+          since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        })
+      : await detectPriorityShifters(sessionCtx);
+  // weekly uses detectPriorityShifters default 7-day window.
+
   // --- Build plain-text and HTML body ---
   const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://exec-db.local";
   const unsubLink = `${appBaseUrl}/api/digest/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
@@ -158,6 +173,35 @@ export async function assembleDigestBody(
     }
     lines.push("");
   }
+
+  // --- Priority shifts section (Stream Q — SY-014 / W8.2) ---
+  // Placed after Top Priorities (Stream P's section) and before Completed.
+  // Only rendered when at least one shifter is detected.
+  // COMPOSE NOTE FOR STREAM P: Insert your "Top priorities" section before
+  // this block.  This block begins with the sentinel comment below so P can
+  // safely find + splice around it.
+  /* BEGIN:priority-shifts — do not remove this comment */
+  if (shifters.length > 0) {
+    lines.push(`## Priority shifts (${shifters.length})`);
+    lines.push("");
+    lines.push(
+      "_These inbound signals may require immediate attention above your normal task list._",
+    );
+    lines.push("");
+    for (const s of shifters) {
+      const kindLabel =
+        s.kind === "customer_complaint" ? "[Customer complaint]" : "[Competitor mention]";
+      const contactLink = s.contactId
+        ? ` — [view contact](${appBaseUrl}/crm/contacts/${s.contactId})`
+        : "";
+      lines.push(`- ${kindLabel} **${s.subject || "(no subject)"}**${contactLink}`);
+      if (s.snippet) {
+        lines.push(`  > ${s.snippet.slice(0, 160).replace(/\n/g, " ")}`);
+      }
+    }
+    lines.push("");
+  }
+  /* END:priority-shifts */
 
   if (cadence === "weekly" && recentlyDone.length > 0) {
     lines.push(`## Completed this week (${recentlyDone.length})`);
