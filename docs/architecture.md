@@ -46,3 +46,80 @@ dbt Core, in `transform/`. `staging/` mirrors raw tables 1:1 with light cleanup.
 ## App
 
 Next.js 15 App Router. Each exec question is one mart + one page. Resist building a generic BI tool — Metabase/Hex exists for ad-hoc; the bespoke app is for recurring board-prep surfaces.
+
+## Autodraft (Stream B — PR2-B)
+
+The autodraft subsystem generates structured follow-up email drafts from call notes and email threads. The data flow enforces three invariants at every step: redaction before LLM, single-contact scope, and no auto-send.
+
+### Data flow
+
+```
+1. User clicks "Generate follow-up" on a call note or the contact page
+   │
+   ▼
+2. generateAutodraft(contactId, formData)  [apps/web/app/crm/contacts/actions.ts]
+   │
+   ├─ assertNotAutomatedOutbound()  ← scheduler-guard.ts: blocks phone & first-touch
+   │
+   ├─ getContactContext(contactId, session, { maxNotes:5, maxThreads:5 })
+   │   └─ contact-context.ts: single-contact scope enforced; cross-pollination
+   │      guard throws if any returned row has a different contact_id (AD-008)
+   │
+   ├─ buildAutodraftPrompt(contact, notes, threads, tone)
+   │   └─ Inserts footnote markers [note:<id>] / [thread:<id>] for citation
+   │
+   ├─ safeAnthropic({ model, prompt, contactId, promptClass:"autodraft" })
+   │   ├─ redact(prompt)  ← redaction.ts: masks PHI, PI, banking, SSN, DL,
+   │   │                    non-public addresses before SDK is reached (SY-016)
+   │   ├─ Anthropic SDK call (claude-sonnet-4-6 default; claude-opus-4-7 opt-in)
+   │   └─ recordLlmCall(…)  ← audit-llm.ts: writes audit.llm_call + daily Sheet
+   │
+   ├─ Parse JSON output → { subject, body_markdown, citations }
+   │
+   └─ INSERT crm.draft (status="pending", promptHash=sha256(assembled-prompt) — pre-redaction; redaction itself happens inside safeAnthropic)
+      ▲ NOT saved to Gmail yet — pending exec review
+```
+
+### User review
+
+The contact detail page renders each pending draft with:
+- Structured sections: Recap / Owners + dates / Next step (SY-005)
+- Citation footnote chips linking back to source note/thread (SY-006)
+- Tone was applied at generation time (SY-007)
+- Two action buttons: "Save to Gmail Drafts" and "Discard"
+
+### Gmail save path (with confidential-content guard)
+
+```
+User clicks "Save to Gmail Drafts"
+   │
+   ▼
+saveDraftToGmail(draftId, contactId, formData)
+   │
+   ├─ assertSafeForGmail(body)  ← draft-guard.ts: scans for banking, deal-term,
+   │   │                          comp, and internal-only markers (AD-003)
+   │   ├─ BLOCKED → throws ConfidentialContentError(reasons[])
+   │   │            UI shows warning + "I confirm this is safe" button
+   │   └─ SAFE → continues
+   │
+   ├─ createGmailDraft(userId, { to, subject, bodyMarkdown, threadId? })
+   │   └─ google-gmail.ts: users.drafts.create only — NEVER users.messages.send
+   │      (AD-004 hard constraint, CI lint check)
+   │
+   └─ UPDATE crm.draft SET status="saved_to_gmail", gmail_draft_id=…
+```
+
+If the exec confirms confidential content is intentional, `saveDraftToGmailConfirmed`
+bypasses the guard and writes an audit row to `audit.access_log` (AD-003 override
+audit trail).
+
+### Key invariants (cross-cutting)
+
+| Invariant | Enforced by | Test |
+|---|---|---|
+| No auto-send | `createGmailDraft` (drafts-only) + CI lint | CI grep check |
+| Redaction before LLM | `safeAnthropic` wrapper | `anthropic.test.ts` |
+| No cross-pollination | `getContactContext` + runtime check | `cross-pollination.test.ts` |
+| Every LLM call audited | `recordLlmCall` inside `safeAnthropic` | `audit-llm.test.ts` |
+| Confidential guard | `assertSafeForGmail` before Gmail save | `autodraft.test.ts` |
+| No phone/first-touch automation | `assertNotAutomatedOutbound` | `autodraft.test.ts` |

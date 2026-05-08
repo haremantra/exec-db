@@ -1,4 +1,4 @@
-export type ExecTier = "exec_all" | "function_lead" | "manager" | "employee";
+export type ExecTier = "exec_all" | "function_lead" | "manager" | "employee" | "assistant";
 
 export type FunctionArea = "eng" | "sales" | "gtm" | "ops" | "finance" | "legal" | "hr";
 
@@ -14,6 +14,7 @@ export const TIER_RANK: Record<ExecTier, number> = {
   function_lead: 50,
   manager: 20,
   employee: 0,
+  assistant: 10,
 };
 
 export function canRead(domain: "comp" | "hr" | "fin" | "legal" | "ops" | "core", session: Session): boolean {

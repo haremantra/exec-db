@@ -8,7 +8,7 @@ import type { ExecTier, FunctionArea, Session } from "./rbac.js";
  * the same Session shape. The rest of the app does not need to change.
  */
 
-const TIERS = new Set<ExecTier>(["exec_all", "function_lead", "manager", "employee"]);
+const TIERS = new Set<ExecTier>(["exec_all", "function_lead", "manager", "employee", "assistant"]);
 const FUNCTIONS = new Set<FunctionArea>([
   "eng", "sales", "gtm", "ops", "finance", "legal", "hr",
 ]);

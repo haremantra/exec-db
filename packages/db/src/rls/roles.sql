@@ -59,6 +59,15 @@ GRANT SELECT ON ALL TABLES IN SCHEMA comp TO app_exec;
 GRANT INSERT ON ALL TABLES IN SCHEMA audit TO
   app_exec, app_function_lead, app_manager, app_employee, app_assistant;
 GRANT SELECT ON ALL TABLES IN SCHEMA audit TO app_exec;
+-- audit.llm_call SELECT for non-exec read-only tiers (RLS still gates rows).
+-- Without an explicit GRANT, the row policy `llm_call_lead_read` cannot fire
+-- because Postgres rejects the SELECT before RLS evaluates.
+GRANT SELECT ON audit.llm_call TO app_function_lead, app_assistant;
+-- EXECUTE on the sensitive-contact helper for every tier role that runs
+-- under SET ROLE — RLS policies call this function and Postgres requires
+-- the effective role to have EXECUTE.
+GRANT EXECUTE ON FUNCTION crm.is_sensitive_for_role(uuid) TO
+  app_exec, app_function_lead, app_manager, app_assistant;
 GRANT SELECT ON ALL TABLES IN SCHEMA crm, pm TO
   app_exec, app_function_lead, app_manager, app_assistant;
 GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA crm, pm TO app_exec;

@@ -99,31 +99,12 @@ export const contact = crm.table(
      * separately in packages/db/src/rls/policies.sql (see migration note).
      */
     sensitiveFlag: varchar("sensitive_flag", { length: 32 }),
-    /**
-     * Triage tag (I1 — US-007, W2.5).
-     * Captures the exec's weekly follow-up triage: can I help them, can they
-     * help me, or are they a pilot candidate?  NULL means untagged.
-     *
-     * Migration SQL:
-     *   ALTER TABLE crm.contact ADD COLUMN triage_tag varchar(32);
-     *   ALTER TABLE crm.contact ADD CONSTRAINT contact_triage_tag_chk
-     *     CHECK (triage_tag IS NULL OR triage_tag IN
-     *       ('can_help_them', 'can_help_me', 'pilot_candidate'));
-     */
+    /** Triage tag (I1 — US-007, W2.5). NULL = untagged. */
     triageTag: varchar("triage_tag", { length: 32 }),
-    /**
-     * Work-area tag (I3 — US-001, W1.1).
-     * Groups the contact by the exec's operational work area for the Monday
-     * dashboard swimlane view.  NULL means untagged.
-     *
-     * Migration SQL:
-     *   ALTER TABLE crm.contact ADD COLUMN work_area varchar(32);
-     *   ALTER TABLE crm.contact ADD CONSTRAINT contact_work_area_chk
-     *     CHECK (work_area IS NULL OR work_area IN
-     *       ('prospecting','customer','investor','contractor',
-     *        'board','thought_leadership','admin'));
-     */
+    /** Work-area tag (I3 — US-001, W1.1). NULL = untagged. */
     workArea: varchar("work_area", { length: 32 }),
+    /** Draft flag (G — US-005, SY-001). */
+    isDraft: boolean("is_draft").notNull().default(false),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -311,5 +292,38 @@ export const draft = crm.table(
   (t) => [
     index("draft_contact_idx").on(t.contactId, t.generatedAt),
     index("draft_status_idx").on(t.status),
+  ],
+);
+
+/**
+ * crm.assistant_grant — records which assistants an exec has authorized.
+ *
+ * An assistant with an active grant (revoked_at IS NULL) for a given exec
+ * may read the exec's CRM/PM data at the 'assistant' tier. The grant is
+ * revocable by the exec at any time via revokeAssistant().
+ *
+ * AD-002 / US-023 (PR2-H).
+ */
+export const assistantGrant = crm.table(
+  "assistant_grant",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The exec who granted access. */
+    execUserId: uuid("exec_user_id").notNull(),
+    /** The assistant (Chief-of-Staff / EA) being granted access. */
+    assistantUserId: uuid("assistant_user_id").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    /** Null while the grant is active. Set to now() on revocation. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One active grant per (exec, assistant) pair; allows re-granting after revocation.
+    uniqueIndex("assistant_grant_active_uk")
+      .on(t.execUserId, t.assistantUserId)
+      .where(sql`${t.revokedAt} IS NULL`),
+    index("assistant_grant_exec_idx").on(t.execUserId),
+    index("assistant_grant_assistant_idx").on(t.assistantUserId),
   ],
 );

@@ -122,8 +122,18 @@ export async function searchCallNotes(
         ? undefined // no extra filter — include everything RLS allows
         : isNull(schema.contact.sensitiveFlag); // exclude ANY sensitive contact
 
+      // Escape LIKE metacharacters so `100%` searches for the literal string
+      // instead of a wildcard run. We use the SQL ESCAPE clause is not directly
+      // exposed by the Drizzle `ilike` helper, so we escape backslash, percent,
+      // and underscore before interpolating. The default Postgres LIKE escape
+      // character is backslash.
+      const escapedTerm = trimmed
+        .replace(/\\/g, "\\\\")
+        .replace(/%/g, "\\%")
+        .replace(/_/g, "\\_");
+
       const conditions = [
-        ilike(schema.callNote.markdown, `%${trimmed}%`),
+        ilike(schema.callNote.markdown, `%${escapedTerm}%`),
         ...(sensitiveCondition ? [sensitiveCondition] : []),
       ];
 

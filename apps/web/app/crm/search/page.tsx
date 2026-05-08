@@ -87,10 +87,11 @@ export default async function SearchPage({
             autoFocus
             className="min-w-0 flex-1 rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
           />
-          {/* Preserve includeSensitive if already set */}
-          {includeSensitive && (
-            <input type="hidden" name="includeSensitive" value="1" />
-          )}
+          {/* Note: includeSensitive value is carried by the checkbox below
+              when the toggle is rendered. We deliberately do NOT mirror it
+              into a hidden input — duplicate submissions caused
+              `params.includeSensitive` to deserialise as a string[] in
+              Next.js, breaking the toggle. */}
           <button
             type="submit"
             className="shrink-0 rounded bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
@@ -107,11 +108,6 @@ export default async function SearchPage({
               name="includeSensitive"
               value="1"
               defaultChecked={includeSensitive}
-              onChange={(e) => {
-                // Client-side: the form will re-submit with the updated value.
-                // This is a progressive-enhancement checkbox; if JS is disabled,
-                // the user can manually toggle and hit Search.
-              }}
               className="rounded border-neutral-300"
             />
             Include sensitive contacts (exec only)
@@ -131,7 +127,8 @@ export default async function SearchPage({
       {results !== null && results.length === 0 && (
         <p className="text-sm text-neutral-500">
           No notes matched <strong>&ldquo;{q}&rdquo;</strong>
-          {!includeSensitive && " (sensitive contacts excluded — check the box above to include them)"}.
+          {!includeSensitive && isExec && " (sensitive contacts excluded — check the box above to include them)"}
+          {!includeSensitive && !isExec && " (sensitive contacts always excluded for non-exec users)"}.
         </p>
       )}
 

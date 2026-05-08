@@ -6,7 +6,7 @@ export type Db = PostgresJsDatabase<typeof schema>;
 
 export type SessionContext = {
   userId: string;
-  tier: "exec_all" | "function_lead" | "manager" | "employee";
+  tier: "exec_all" | "function_lead" | "manager" | "employee" | "assistant";
   functionArea: string | null;
 };
 
