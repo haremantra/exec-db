@@ -513,3 +513,77 @@ override is non-destructive and replayable.
 | `apps/web/app/dashboard/page.tsx` | L (layout) + M (card) | Renders "Do this first" card; M filled L's `<div id="do-this-first" />` stub |
 | `apps/web/app/dashboard/actions.ts` | M | `disagreeWithRanker` server action |
 | `apps/web/__tests__/ranker.test.ts` | M | 12 tests including the invariant #7 regression guard |
+
+## Priority shifters (Stream Q — PR3-Q)
+
+Mid-week signals that may outrank the Monday task list: customer complaints and competitor-positioning activity detected in email (SY-014 / W8.2).
+
+### Detection flow
+
+```
+detectPriorityShifters(session, opts?)   [apps/web/lib/priority-shifters.ts]
+  │
+  ├─ 1. SELECT crm.email_thread + LEFT JOIN crm.contact
+  │       WHERE last_message_at >= since (default: 7 days ago)
+  │       LIMIT 200 — ordered newest-first
+  │
+  ├─ 2. loadCustomerDomains()
+  │       ├─ SELECT crm.contact.company WHERE work_area = 'customer' AND sensitive_flag IS NULL
+  │       └─ SELECT core.customer_dim.domain WHERE domain IS NOT NULL
+  │       → merged Set<string> (lower-cased, deduped)
+  │
+  └─ 3. In-process regex scan (pure regex, NO LLM call):
+          ├─ customer_complaint: COMPLAINT_PATTERN matches subject+body
+          │   AND contactCompany ∈ customerDomains (fuzzy: base-domain substring)
+          │   → PriorityShifter { kind: "customer_complaint", … }
+          │
+          └─ competitor_mention: body contains COMPETITOR_DOMAINS env-var domain
+              OR COMPETITOR_SWITCH_PATTERN ("we're going with" / "switched to" / "evaluating …")
+              → PriorityShifter { kind: "competitor_mention", … }
+
+  Results capped at 20, ordered newest-first.
+```
+
+### Surface points
+
+| Surface | Condition | Behaviour |
+|---|---|---|
+| Dashboard banner | `detectPriorityShifters` returns ≥ 1 result | Red-border banner **above** the header and all 5 swimlanes (invariant #6 preserved — banner is outside swimlane grid). Lists count + first 3 results with kind badge, subject link, and snippet. |
+| Digest email | ≥ 1 shifter in look-back window (24 h daily / 7 days weekly) | `## Priority shifts (N)` section added **after** Stream P's "Top priorities" block and **before** "Completed this week." Contains one bullet per shifter with kind label and contact link. |
+
+### Pattern specifications
+
+| Pattern | Regex / method | Trigger condition |
+|---|---|---|
+| `customer_complaint` | `/frustrated\|unacceptable\|cancel(ling\|ing\|ed\|s)?\|refund\|not working\|issue with\|complaint\|disappointed/i` | Keyword match **AND** sender domain ∈ known-customer set |
+| `competitor_mention` (domain) | Plain `String.includes` | `COMPETITOR_DOMAINS` env var set + domain in body |
+| `competitor_mention` (phrase) | `/we'?re going with\|switched to\|evaluating\s+\S+/i` | No env var required — fires on any of the three phrases |
+
+### Configuration
+
+| Env var | Default | Description |
+|---|---|---|
+| `COMPETITOR_DOMAINS` | `""` (empty — disabled) | Comma-separated list of competitor domain strings (e.g. `"rival.io,acme-alt.com"`). When empty, domain-based competitor detection is disabled. Phrase-based detection always runs. |
+
+### Key invariants
+
+| Invariant | How enforced |
+|---|---|
+| No LLM call | Entire detector is regex + SQL — `safeAnthropic` is never called |
+| Sensitive contacts excluded | JOIN condition `AND crm.contact.sensitive_flag IS NULL` excludes sensitive contact rows |
+| Invariant #6 (5 swimlanes) | Banner is rendered outside the swimlane `<section>` grid; test 9 in `priority-shifters.test.ts` guards the marker names statically |
+| Results bounded | Hard `LIMIT 200` in DB fetch + `if (results.length >= 20) break` in-process |
+
+### Files
+
+| File | Owner | Purpose |
+|---|---|---|
+| `apps/web/lib/priority-shifters.ts` | Q | `detectPriorityShifters`, `parseCompetitorDomains` |
+| `apps/web/app/dashboard/page.tsx` | L+M+Q | Q adds `PriorityShiftersBanner` component and concurrent detection call |
+| `apps/web/lib/digest-body.ts` | O (infra) + Q (section) | Q adds `## Priority shifts` section after P's top-priorities block |
+| `apps/web/__tests__/priority-shifters.test.ts` | Q | 9 tests including invariant #6 static guard |
+
+### Concurrency notes (parallel streams N, P, Q, R)
+
+- **Dashboard (vs N):** Q's banner is placed above the `<header>` element. Stream N adds its own section inside the swimlane area. No merge conflict expected.
+- **Digest (vs P):** Q's section is bracketed by `/* BEGIN:priority-shifts */` / `/* END:priority-shifts */` sentinel comments so Stream P can reliably splice around it. Place P's "Top priorities" section **before** the `BEGIN:priority-shifts` comment.
