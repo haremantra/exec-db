@@ -1,0 +1,14 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/digest-daily",
+      "schedule": "0 14 * * *",
+      "_comment": "Runs daily at 14:00 UTC = 7:00 am America/Los_Angeles (PDT, UTC-7). Adjust to 15:00 UTC in winter (PST, UTC-8)."
+    },
+    {
+      "path": "/api/cron/digest-weekly",
+      "schedule": "0 14 * * 0",
+      "_comment": "Runs every Sunday at 14:00 UTC = 7:00 am America/Los_Angeles (PDT). See note above for PST."
+    }
+  ]
+}

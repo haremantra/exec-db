@@ -73,6 +73,77 @@ dbt Core, in `transform/`. `staging/` mirrors raw tables 1:1 with light cleanup.
 
 Next.js 15 App Router. Each exec question is one mart + one page. Resist building a generic BI tool — Metabase/Hex exists for ad-hoc; the bespoke app is for recurring board-prep surfaces.
 
+## Digests (Stream O — PR3-O)
+
+Exec-db sends task-summary digest emails via **Resend** (not Gmail send; AD-004 / S6.5).
+Each user opts in per cadence; both daily and weekly are off by default.
+
+### Digest worker flow
+
+```
+Vercel Cron fires GET /api/cron/digest-daily  (14:00 UTC = 7 am America/Los_Angeles PDT)
+              or GET /api/cron/digest-weekly (14:00 UTC Sundays)
+  │
+  ├─ Auth: Authorization: Bearer ${CRON_SECRET}  — reject 401 if missing/wrong
+  │
+  ├─ SELECT crm.user_pref WHERE digest_daily_optin = true  (or weekly variant)
+  │
+  └─ For each opted-in user → sendDigest(userId, cadence)
+       │
+       ├─ 1. Read crm.user_pref — skip if not opted in  (reason: not_opted_in)
+       │
+       ├─ 2. Resolve work_email from core.employee_dim  (skip if absent)
+       │
+       ├─ 3. assembleDigestBody(userId, cadence, unsubscribeToken)
+       │       ← deterministic stub in PR3-O; Stream P replaces with Claude-ranked body
+       │       ← Reads pm.task JOIN pm.project WHERE owner_id = userId
+       │       ← daily: active tasks only (status <> 'done')
+       │       ← weekly: active + completed in last 7 days
+       │       ← embeds /api/digest/unsubscribe?token=<token> link
+       │
+       ├─ 4. sendEmailViaResend({ to, subject, html, text })
+       │       ← throws on failure; cron handler records error in summary JSON
+       │       ← NO gmail.users.messages.send call (AD-004 hard constraint)
+       │
+       └─ 5. INSERT pm.digest_send (recipient_id, cadence, task_count, body_markdown, gmail_message_id)
+```
+
+### Cron schedule
+
+| Cron | Schedule | UTC | America/Los_Angeles |
+|---|---|---|---|
+| `/api/cron/digest-daily`  | `0 14 * * *`   | 14:00 UTC daily    | 7:00 am PDT (UTC-7) |
+| `/api/cron/digest-weekly` | `0 14 * * 0`   | 14:00 UTC Sundays  | 7:00 am PDT (UTC-7) |
+
+Note: During PST (UTC-8, Nov–Mar) the cron fires at 6:00 am. Adjust to `0 15 * * *`
+and `0 15 * * 0` if 7 am year-round delivery is required (S5.8: single fixed TZ).
+
+### Opt-in and unsubscribe
+
+- `crm.user_pref` — one row per user; `digest_daily_optin` + `digest_weekly_optin`
+  both default to `false` (opt-in per S5.2).
+- Settings UI: `/settings/digest` — checkboxes + Save button (server action `setDigestOptin`).
+- Unsubscribe: `GET /api/digest/unsubscribe?token=<unsubscribe_token>` — token-based,
+  no login required. Sets both opt-ins to false and returns a plain HTML confirmation.
+- Snooze is deferred (S5.7).
+
+### Key invariants
+
+| Invariant | Enforced by |
+|---|---|
+| No Gmail send | `sendEmailViaResend` uses Resend API only; CI grep blocks `gmail.users.messages.send` |
+| Opt-in required | `sendDigest` checks `crm.user_pref` and returns `not_opted_in` if absent |
+| Cron auth | Bearer `${CRON_SECRET}` header required; 401 on mismatch |
+| Digest record | `pm.digest_send` row inserted on every successful delivery |
+
+### Stream P handoff
+
+`apps/web/lib/digest-body.ts:assembleDigestBody()` is a deterministic stub.
+Stream P will replace it with a Claude-ranked version that:
+- Weights tasks by revenue + reputation impact (S5.5 / S5.6 overrides).
+- Produces counterfactual rationale ("here's what was deprioritized and why", US-024 / SY-013).
+- Excludes tasks linked to sensitive contacts via `getContactContext`-style retrieval.
+
 ## Autodraft (Stream B — PR2-B)
 
 The autodraft subsystem generates structured follow-up email drafts from call notes and email threads. The data flow enforces three invariants at every step: redaction before LLM, single-contact scope, and no auto-send.
