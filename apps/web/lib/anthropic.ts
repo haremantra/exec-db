@@ -22,7 +22,7 @@ import { redact, type RedactionClass } from "./redaction";
 
 const MODEL_IDS = {
   opus: "claude-opus-4-7",
-  sonnet: "claude-sonnet-4-5",
+  sonnet: "claude-sonnet-4-6",
 } as const;
 
 export type SafeAnthropicModel = keyof typeof MODEL_IDS;
