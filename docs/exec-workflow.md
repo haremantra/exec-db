@@ -72,8 +72,8 @@ _Last updated: 2026-05-07_
 - **W9.4** recommend-to-another-exec trigger: "I do not miss obligations or opportunities."
 
 ## J. Permissions, privacy, boundaries
-- **W10.1** never-leaves-laptop data: _unanswered_
-- **W10.2** sensitive-by-existence contacts: _unanswered_
-- **W10.3** offboarding plan for notes: _unanswered_
-- **W10.4** auto-redact in LLM calls: _unanswered_
-- **W10.5** prompt audit log expectations: _unanswered_
+- **W10.1** never-leaves-laptop data: CRM list, prospect lists, pricing sheets, product slips and other proprietary info, banking info, PI, PHI, tickets, bug fixes, compromises.
+- **W10.2** sensitive-by-existence contacts: partnerships, acquisition targets, offers to get bought out, LOIs, venture capital reach-outs, investments.
+- **W10.3** offboarding plan for notes: if I leave the company and pursue an unrelated project, I'd want a copy of the CRM but would leave the original for the transition team or new exec.
+- **W10.4** auto-redact in LLM calls: PHI, PI, banking information, personal names, SSN, driver licenses, non-public business addresses or emails.
+- **W10.5** prompt audit log expectations: yes — logged to a daily Google Sheet, consumable by Gemini for alerts and analytics.
