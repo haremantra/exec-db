@@ -1,5 +1,6 @@
 "use server";
 
+import { eq, sql } from "drizzle-orm";
 import { schema } from "@exec-db/db";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
@@ -27,6 +28,9 @@ export type RetrospectiveJudgement =
  * The action is bound to a specific taskId via `.bind(null, taskId)` before
  * being passed to a <form action>. The `judgement` value is read from the
  * submitted FormData (radio input named "judgement").
+ *
+ * Ownership guard: verifies the task belongs to the authenticated user and
+ * has status='done' before writing the audit row. Throws if not found.
  *
  * TODO(ranker-training): Feed these rows into the counterfactual ranker
  *   (Stream M) as a signal: tasks whose owners consistently "broke_promise"
@@ -62,6 +66,23 @@ export async function recordRetrospectiveJudgement(
   await query(
     { userId: session.userId, tier: session.tier, functionArea: session.functionArea },
     async (tx) => {
+      // Ownership guard: verify the task belongs to the authenticated user
+      // and has status='done' before writing the audit row.
+      const ownershipCheck = await tx
+        .select({ id: schema.task.id })
+        .from(schema.task)
+        .where(
+          sql`${schema.task.id} = ${taskId}
+              AND ${schema.task.ownerId} = ${session.userId}
+              AND ${schema.task.status} = 'done'`,
+        );
+
+      if (ownershipCheck.length === 0) {
+        throw new Error(
+          `Task ${taskId} not found, not owned by current user, or not completed.`,
+        );
+      }
+
       await recordAccess(tx, session, {
         schemaName: "pm",
         tableName: "task",

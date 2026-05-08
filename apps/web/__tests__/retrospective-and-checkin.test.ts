@@ -16,18 +16,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── drizzle-orm stub ──────────────────────────────────────────────────────────
 vi.mock("drizzle-orm", () => ({
-  eq:     (_col: unknown, _val: unknown) => ({ __type: "eq",   col: _col, val: _val }),
-  and:    (...args: unknown[])           => ({ __type: "and",  args }),
-  not:    (_expr: unknown)               => ({ __type: "not",  expr: _expr }),
-  gt:     (_col: unknown, _val: unknown) => ({ __type: "gt",   col: _col, val: _val }),
-  gte:    (_col: unknown, _val: unknown) => ({ __type: "gte",  col: _col, val: _val }),
-  lt:     (_col: unknown, _val: unknown) => ({ __type: "lt",   col: _col, val: _val }),
+  eq:      (_col: unknown, _val: unknown) => ({ __type: "eq",      col: _col, val: _val }),
+  and:     (...args: unknown[])           => ({ __type: "and",     args }),
+  not:     (_expr: unknown)               => ({ __type: "not",     expr: _expr }),
+  gt:      (_col: unknown, _val: unknown) => ({ __type: "gt",      col: _col, val: _val }),
+  gte:     (_col: unknown, _val: unknown) => ({ __type: "gte",     col: _col, val: _val }),
+  lt:      (_col: unknown, _val: unknown) => ({ __type: "lt",      col: _col, val: _val }),
+  ne:      (_col: unknown, _val: unknown) => ({ __type: "ne",      col: _col, val: _val }),
+  desc:    (_col: unknown)                => ({ __type: "desc",    col: _col }),
+  asc:     (_col: unknown)                => ({ __type: "asc",     col: _col }),
+  isNull:  (_col: unknown)                => ({ __type: "isNull",  col: _col }),
+  ilike:   (_col: unknown, _val: unknown) => ({ __type: "ilike",   col: _col, val: _val }),
   inArray: (_col: unknown, _vals: unknown) => ({ __type: "inArray", col: _col, vals: _vals }),
-  sql: (parts: TemplateStringsArray, ...vals: unknown[]) => ({
-    __type: "sql",
-    parts,
-    vals,
-  }),
+  sql: Object.assign(
+    (parts: TemplateStringsArray, ...vals: unknown[]) => ({ __type: "sql", parts, vals }),
+    { raw: (s: string) => ({ __type: "sql_raw", s }) },
+  ),
 }));
 
 // ── @exec-db/db stub ──────────────────────────────────────────────────────────
@@ -37,7 +41,13 @@ function makeTable(name: string, schemaName: string) {
   const t: Record<symbol | string, unknown> = {};
   t[nameSym]   = name;
   t[schemaSym] = schemaName;
-  return t;
+  return new Proxy(t, {
+    get(target, prop) {
+      if (typeof prop === "symbol") return target[prop];
+      if (prop in target) return target[prop];
+      return { __col: `${schemaName}.${name}.${prop}` };
+    },
+  });
 }
 
 vi.mock("@exec-db/db", () => ({
@@ -96,6 +106,24 @@ vi.mock("@/lib/db", () => ({
                   where: async (_w?: unknown) => result,
                 };
               },
+              limit(_n: number) {
+                return {
+                  then: (ok?: (v: unknown) => unknown) =>
+                    Promise.resolve(result).then(ok),
+                };
+              },
+              orderBy(_col: unknown) {
+                return {
+                  limit(_n: number) {
+                    return {
+                      then: (ok?: (v: unknown) => unknown) =>
+                        Promise.resolve(result).then(ok),
+                    };
+                  },
+                  then: (ok?: (v: unknown) => unknown) =>
+                    Promise.resolve(result).then(ok),
+                };
+              },
             };
           },
         };
@@ -112,6 +140,32 @@ vi.mock("@/lib/db", () => ({
     };
     return fn(tx);
   }),
+}));
+
+// ── @/lib/ranker stub (needed by digest-body) ─────────────────────────────────
+vi.mock("@/lib/ranker", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ranker")>();
+  return {
+    ...actual,
+    rankTasks: vi.fn(async () => ({
+      topPick: null,
+      alternatives: [],
+    })),
+  };
+});
+
+// ── @/lib/cadence-alert stub (needed by digest-body) ─────────────────────────
+vi.mock("@/lib/cadence-alert", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/cadence-alert")>();
+  return {
+    ...actual,
+    getCadenceAlerts: vi.fn(async () => []),
+  };
+});
+
+// ── @/lib/priority-shifters stub (needed by digest-body for Q section) ────────
+vi.mock("@/lib/priority-shifters", () => ({
+  detectPriorityShifters: vi.fn(async () => []),
 }));
 
 // ── @/lib/auth stub ───────────────────────────────────────────────────────────
@@ -135,11 +189,10 @@ afterEach(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Group 1: Retrospective — task inclusion / exclusion
+// Group 1: Retrospective — task inclusion / exclusion  [re-enabled in stream T]
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// TODO(stream-T): re-enable after T re-integrates R's full digest-body sections.
-describe.skip("retrospective — completed-task date filter", () => {
+describe("retrospective — completed-task date filter", () => {
   /**
    * Helper: build a fake completed task.
    * `daysAgo` determines the completedAt timestamp.
@@ -160,7 +213,7 @@ describe.skip("retrospective — completed-task date filter", () => {
   }
 
   it("TEST-1: assembleDigestBody weekly includes tasks completed ≤7 days ago", async () => {
-    // Seed: two tasks (1-day-old and 6-day-old) plus empty pending-drafts.
+    // Seed: two tasks (1-day-old and 6-day-old) plus empty pending-drafts, empty priority-shifters.
     const taskA = makeTask("aaa", 1);
     const taskB = makeTask("bbb", 6);
     // First select = tasks; second select = pending drafts (empty).
@@ -240,6 +293,9 @@ describe("recordRetrospectiveJudgement", () => {
   });
 
   it("TEST-7: accepts 'kept_promise' and writes an audit.access_log row", async () => {
+    // Seed ownership check result: one row matching the task/owner/done condition.
+    selectQueue = [[{ id: TASK_ID }]];
+
     const { recordRetrospectiveJudgement } = await import(
       "@/app/retrospective/actions"
     );
@@ -260,6 +316,9 @@ describe("recordRetrospectiveJudgement", () => {
   });
 
   it("TEST-8: accepts 'partial' and 'broke_promise' without throwing", async () => {
+    // Seed ownership check: task found for each call.
+    selectQueue = [[{ id: TASK_ID }], [{ id: TASK_ID }]];
+
     const { recordRetrospectiveJudgement } = await import(
       "@/app/retrospective/actions"
     );
@@ -273,18 +332,16 @@ describe("recordRetrospectiveJudgement", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Group 4: Digest pending-draft section
+// Group 4: Digest pending-draft section  [re-enabled in stream T]
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// TODO(stream-T): re-enable after T re-integrates R's drafts section into digest-body.ts.
-describe.skip("digest pending-draft section", () => {
-  function makeDraft(id: string, hoursAgo: number, status = "pending") {
+describe("digest pending-draft section", () => {
+  function makeDraft(id: string, hoursAgo: number, _status = "pending") {
     return {
-      draftId: id,
+      id: id,
       contactId: `contact-${id}`,
       subject: `Follow-up ${id}`,
       generatedAt: new Date(Date.now() - hoursAgo * 60 * 60 * 1000),
-      status,
       contactName: `Contact ${id}`,
     };
   }

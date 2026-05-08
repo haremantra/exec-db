@@ -260,6 +260,22 @@ export default async function ProjectDetailPage({
                     {t.description && (
                       <div className="mt-0.5 text-xs text-neutral-500">{t.description}</div>
                     )}
+                    {/* Needs check-in badge (R2 — SY-010, US-020, W6.4).
+                        Shown when awaiting_response_until is set and has passed. */}
+                    {t.awaitingResponseUntil &&
+                      t.awaitingResponseUntil < new Date() && (
+                        <div className="mb-1 mt-1 flex items-center gap-2">
+                          <span className="inline-flex items-center rounded bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+                            Needs check-in
+                          </span>
+                          <a
+                            href={`/crm/contacts?draft_checkin=1&task_title=${encodeURIComponent(t.title)}`}
+                            className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200"
+                          >
+                            Draft check-in
+                          </a>
+                        </div>
+                      )}
                     <div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-xs text-neutral-500">
                       <span>
                         P{t.priority}

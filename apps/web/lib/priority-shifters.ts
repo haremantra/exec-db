@@ -18,7 +18,9 @@
  *
  * COMPETITOR_DOMAINS env var: comma-separated list of competitor domain strings.
  * Example: COMPETITOR_DOMAINS="acme.com,rivalapp.io,competitorco.com"
- * When empty / unset, competitor_mention detection is disabled.
+ * Domain-based competitor detection is disabled when COMPETITOR_DOMAINS is
+ * empty/unset; phrase-based detection (e.g., 'we're going with') runs
+ * unconditionally.
  */
 
 import { and, desc, gte, isNotNull, isNull, sql } from "drizzle-orm";
@@ -268,7 +270,10 @@ function isKnownCustomer(company: string, customerDomains: Set<string>): boolean
   for (const d of customerDomains) {
     // Strip TLD suffix from domain for a fuzzy match.
     const base = d.split(".")[0];
-    if (base && (lc.includes(base) || base.includes(lc))) return true;
+    // Minimum-length guard: skip fuzzy matching for very short tokens to
+    // avoid false positives (e.g. "co" matching "company", "inc" matching
+    // "linc").  Copilot review: lc.length < 4 is too broad.
+    if (base && base.length >= 4 && lc.length >= 4 && (lc.includes(base) || base.includes(lc))) return true;
   }
   return false;
 }

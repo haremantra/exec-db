@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { schema } from "@exec-db/db";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
@@ -83,11 +83,16 @@ export default async function RetrospectivePage(): Promise<JSX.Element> {
   );
 
   // Group completed tasks by project.
-  const byProject = new Map<string, { name: string; tasks: typeof completedTasks }>();
+  // Use "no-project" as a sentinel key when projectId is null (Copilot fix).
+  const byProject = new Map<string, { name: string; tasks: typeof completedTasks; projectId: string | null }>();
   for (const t of completedTasks) {
-    const key = t.projectId;
+    const key = t.projectId ?? "no-project";
     if (!byProject.has(key)) {
-      byProject.set(key, { name: t.projectName ?? "(No project)", tasks: [] });
+      byProject.set(key, {
+        name: t.projectName ?? "(No project)",
+        tasks: [],
+        projectId: t.projectId,
+      });
     }
     byProject.get(key)!.tasks.push(t);
   }
@@ -133,15 +138,20 @@ export default async function RetrospectivePage(): Promise<JSX.Element> {
           <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
             Completed tasks by project ({completedTasks.length})
           </h3>
-          {Array.from(byProject.entries()).map(([projectId, { name, tasks }]) => (
-            <div key={projectId} className="space-y-2">
+          {Array.from(byProject.entries()).map(([key, { name, tasks, projectId }]) => (
+            <div key={key} className="space-y-2">
               <h4 className="font-medium text-sm">
-                <a
-                  href={`/pm/projects/${projectId}`}
-                  className="text-neutral-800 underline-offset-2 hover:underline dark:text-neutral-200"
-                >
-                  {name}
-                </a>
+                {/* Only render a link when we have an actual project ID */}
+                {projectId ? (
+                  <a
+                    href={`/pm/projects/${projectId}`}
+                    className="text-neutral-800 underline-offset-2 hover:underline dark:text-neutral-200"
+                  >
+                    {name}
+                  </a>
+                ) : (
+                  <span className="text-neutral-800 dark:text-neutral-200">{name}</span>
+                )}
               </h4>
               <ul className="space-y-2">
                 {tasks.map((t) => (
@@ -208,6 +218,7 @@ function TaskJudgementRow({ task }: { task: TaskRow }): JSX.Element {
               type="radio"
               name="judgement"
               value={val}
+              required
               className="sr-only"
             />
             {val === "kept_promise"

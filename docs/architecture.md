@@ -673,3 +673,54 @@ detectPriorityShifters(session, opts?)   [apps/web/lib/priority-shifters.ts]
 
 - **Dashboard (vs N):** Q's banner is placed above the `<header>` element. Stream N adds its own section inside the swimlane area. No merge conflict expected.
 - **Digest (vs P):** Q's section is bracketed by `/* BEGIN:priority-shifts */` / `/* END:priority-shifts */` sentinel comments so Stream P can reliably splice around it. Place P's "Top priorities" section **before** the `BEGIN:priority-shifts` comment.
+
+---
+
+## PR3 complete — all 10 streams (T)
+
+Stream T (PR3-T) is the final cleanup stream. It re-integrated digest sections
+that were reverted during parallel-merge resolution, re-enabled 4 skipped tests,
+and applied high-value Copilot review feedback.
+
+### Streams K–T: PR3 summary
+
+| Stream | PR | Summary |
+|---|---|---|
+| K | #23 | Task ergonomics foundation: `impact` enum, `is_pinned`, `blocked`/`stuck` split, `project_type` enum |
+| L | #27 | Monday 5-swimlane dashboard (`/dashboard`); 5-lane invariant #6 |
+| M | #25 | Counterfactual ranker (`rankTasks`, Opus); "Do this first" card + "I disagree" override |
+| N | #28 | Tuesday close-ready cohort + slipped-task resurfacing; `buildSlippedSection` / `buildCloseReadySection` |
+| O | #24 | Digest infrastructure: Vercel Cron, Resend, opt-in `crm.user_pref`, unsubscribe link |
+| P | #29 | Digest content: Claude-ranked body (`assembleDigestBody`), cadence alerts |
+| Q | #30 | Priority shifters: regex + SQL detector; dashboard banner; digest `## Priority shifts` section |
+| R | — | Weekly retrospective (`/retrospective`), check-in nudge badge, pending-draft digest reminder |
+| S | #26 | CRM export (zip), "remember this" star on call notes, pin ops Gmail threads |
+| T | — | Final cleanup: digest re-integration (R's pending-drafts + Q's priority-shifts), 4 skipped tests re-enabled, Copilot fix sweep |
+
+### Digest section order (final)
+
+After stream T, `assembleDigestBody` renders sections in this order:
+
+1. Top priorities today/this week (P)
+2. What I deprioritized and why (M counterfactual, via P)
+3. Other items (P)
+4. Cadence (P)
+5. **Drafts pending review >24h** (R — re-integrated by T)
+6. **Priority shifts** (Q — re-integrated by T)
+7. Slipped this week (N, via dynamic import)
+8. Sales — close-ready (N, Tuesdays only)
+9. Completed this week (O, weekly only)
+
+### Files added/changed by stream T
+
+| File | Change |
+|---|---|
+| `apps/web/lib/digest-body.ts` | +pending-drafts section, +priority-shifts section, +`escapeMarkdown`, tier comment, `detectPriorityShifters` import |
+| `apps/web/app/retrospective/actions.ts` | New — `recordRetrospectiveJudgement` server action with ownership guard |
+| `apps/web/app/retrospective/page.tsx` | New — `/retrospective` weekly view; null-safe `projectId` grouping; `required` on radio inputs; removed unused imports |
+| `apps/web/app/layout.tsx` | Added "Retro" nav link |
+| `apps/web/lib/priority-shifters.ts` | Docstring fix; fuzzy-match minimum-length guard (`lc.length >= 4`) |
+| `apps/web/__tests__/retrospective-and-checkin.test.ts` | New — 10 tests (Groups 1–4); Groups 1 and 4 re-enabled after reintegration |
+| `apps/web/__tests__/priority-shifters.test.ts` | Removed unused `parseCompetitorDomains` from destructure |
+| `docs/architecture.md` | This section |
+| `docs/pr3-spec.md` | Done-definition status ticks |

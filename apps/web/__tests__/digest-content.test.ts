@@ -22,11 +22,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── drizzle-orm stub ──────────────────────────────────────────────────────────
 vi.mock("drizzle-orm", () => ({
-  eq:   (_c: unknown, _v: unknown) => ({ __type: "eq",  c: _c, v: _v }),
-  and:  (...args: unknown[])       => ({ __type: "and", args }),
-  not:  (_e: unknown)              => ({ __type: "not", e: _e }),
-  gte:  (_c: unknown, _v: unknown) => ({ __type: "gte", c: _c, v: _v }),
-  or:   (...args: unknown[])       => ({ __type: "or",  args }),
+  eq:      (_c: unknown, _v: unknown) => ({ __type: "eq",   c: _c, v: _v }),
+  and:     (...args: unknown[])       => ({ __type: "and",  args }),
+  not:     (_e: unknown)              => ({ __type: "not",  e: _e }),
+  gte:     (_c: unknown, _v: unknown) => ({ __type: "gte",  c: _c, v: _v }),
+  or:      (...args: unknown[])       => ({ __type: "or",   args }),
+  desc:    (_c: unknown)              => ({ __type: "desc", c: _c }),
+  isNull:  (_c: unknown)              => ({ __type: "isNull", c: _c }),
+  isNotNull: (_c: unknown)            => ({ __type: "isNotNull", c: _c }),
   sql: Object.assign(
     (parts: TemplateStringsArray, ...vals: unknown[]) => ({ __type: "sql", parts, vals }),
     { raw: (s: string) => ({ __type: "sql_raw", s }) },
@@ -53,6 +56,7 @@ vi.mock("@exec-db/db", () => ({
     contact:     makeTable("contact"),
     callNote:    makeTable("call_note"),
     emailThread: makeTable("email_thread"),
+    draft:       makeTable("draft"),
   },
 }));
 
@@ -125,6 +129,14 @@ vi.mock("@/lib/cadence-alert", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/cadence-alert")>();
   return { ...actual, getCadenceAlerts: getCadenceAlertsFn };
 });
+
+// ── detectPriorityShifters mock ───────────────────────────────────────────────
+// digest-body.ts imports detectPriorityShifters from priority-shifters.ts;
+// mock it here so the digest-content tests do not pull in the full
+// priority-shifters module with its own drizzle-orm dependencies.
+vi.mock("@/lib/priority-shifters", () => ({
+  detectPriorityShifters: vi.fn(async () => []),
+}));
 
 // ── Test lifecycle ─────────────────────────────────────────────────────────────
 beforeEach(() => {

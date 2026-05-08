@@ -155,7 +155,7 @@ afterEach(() => {
 });
 
 // ── Import after mocks ────────────────────────────────────────────────────────
-const { detectPriorityShifters, parseCompetitorDomains } = await import(
+const { detectPriorityShifters } = await import(
   "@/lib/priority-shifters"
 );
 
