@@ -54,10 +54,10 @@ _Last updated: 2026-05-07_
 - **W6.6** 5 fields on a "this week" screen: (1) prospects qualified to follow up with; (2) all emails for progress and inbox-zero; (3) admin tasks (paying vendors and contractors); (4) thought-leadership literature I draft; (5) product development roadmap.
 
 ## G. Delegation, team, and assistants
-- **W7.1** who else sees / who must not: _unanswered_
-- **W7.2** automatable today-asks: _unanswered_
-- **W7.3** must-stay-human work: _unanswered_
-- **W7.4** function lead reading exec notes: _unanswered_
+- **W7.1** who else sees / who must not: Assistant + Claude cowork as Chief of Staff.
+- **W7.2** automatable today-asks: prioritizing to-do lists, email triage, monitoring prospect funnel, sales funnel updates, scheduling appointments.
+- **W7.3** must-stay-human work: calling customers and responding to prospect inquiries.
+- **W7.4** function lead reading exec notes: helpful.
 
 ## H. Decisions and priorities
 - **W8.1** Monday prioritization heuristic: _unanswered_
