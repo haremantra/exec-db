@@ -72,21 +72,6 @@ export const contact = crm.table(
      * true  → contact was auto-created from a LinkedIn URL or email intake
      *         and awaits exec confirmation ("needs review").
      * false → exec-confirmed; never overwritten by auto-create logic.
-     *
-     * Schema choice: single boolean column on crm.contact rather than a
-     * separate crm.contact_draft table.  Rationale: draft contacts share
-     * all the same fields as confirmed contacts (name, email, company,
-     * title) so a second table would duplicate the schema; the only
-     * difference is the confirmation state.  A boolean column is simpler,
-     * keeps all queries against one table, and is trivially dropped later
-     * if a richer workflow state machine is needed.
-     *
-     * Migration SQL:
-     *   ALTER TABLE crm.contact ADD COLUMN is_draft boolean NOT NULL DEFAULT false;
-     * Existing rows (all exec-confirmed) default to false — no backfill needed.
-     * Drafts inherit the existing RLS visibility rules; no new policies required
-     * since the exec (exec_all tier) already has full SELECT/INSERT/UPDATE/DELETE
-     * on crm.contact.
      */
     isDraft: boolean("is_draft").notNull().default(false),
     createdBy: uuid("created_by").notNull(),
@@ -254,5 +239,38 @@ export const draft = crm.table(
   (t) => [
     index("draft_contact_idx").on(t.contactId, t.generatedAt),
     index("draft_status_idx").on(t.status),
+  ],
+);
+
+/**
+ * crm.assistant_grant — records which assistants an exec has authorized.
+ *
+ * An assistant with an active grant (revoked_at IS NULL) for a given exec
+ * may read the exec's CRM/PM data at the 'assistant' tier. The grant is
+ * revocable by the exec at any time via revokeAssistant().
+ *
+ * AD-002 / US-023 (PR2-H).
+ */
+export const assistantGrant = crm.table(
+  "assistant_grant",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The exec who granted access. */
+    execUserId: uuid("exec_user_id").notNull(),
+    /** The assistant (Chief-of-Staff / EA) being granted access. */
+    assistantUserId: uuid("assistant_user_id").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    /** Null while the grant is active. Set to now() on revocation. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One active grant per (exec, assistant) pair; allows re-granting after revocation.
+    uniqueIndex("assistant_grant_active_uk")
+      .on(t.execUserId, t.assistantUserId)
+      .where(sql`${t.revokedAt} IS NULL`),
+    index("assistant_grant_exec_idx").on(t.execUserId),
+    index("assistant_grant_assistant_idx").on(t.assistantUserId),
   ],
 );

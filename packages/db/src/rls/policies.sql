@@ -203,7 +203,7 @@ ALTER TABLE crm.contact FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS contact_read ON crm.contact;
 CREATE POLICY contact_read ON crm.contact FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     -- Sensitive contacts are hidden from all non-exec tiers.
     AND NOT crm.is_sensitive_for_role(crm.contact.id)
     -- exec_all sees everything: is_sensitive_for_role returns false for them.
@@ -220,7 +220,7 @@ ALTER TABLE crm.account FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS account_read ON crm.account;
 CREATE POLICY account_read ON crm.account FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant'));
 
 DROP POLICY IF EXISTS account_write ON crm.account;
 CREATE POLICY account_write ON crm.account FOR ALL
@@ -234,7 +234,7 @@ ALTER TABLE crm.call_note FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS call_note_read ON crm.call_note;
 CREATE POLICY call_note_read ON crm.call_note FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     -- Hide notes whose parent contact is sensitive from non-exec roles.
     AND NOT crm.is_sensitive_for_role(crm.call_note.contact_id)
   );
@@ -251,7 +251,7 @@ ALTER TABLE crm.calendar_event FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS calendar_event_read ON crm.calendar_event;
 CREATE POLICY calendar_event_read ON crm.calendar_event FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     -- contact_id is nullable on calendar_event (event may have no linked contact).
     -- Only filter when a contact is linked; unlinked events are always visible.
     AND (
@@ -272,7 +272,7 @@ ALTER TABLE crm.email_thread FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS email_thread_read ON crm.email_thread;
 CREATE POLICY email_thread_read ON crm.email_thread FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     -- contact_id is nullable on email_thread (thread may have no linked contact).
     AND (
       crm.email_thread.contact_id IS NULL
@@ -291,7 +291,7 @@ ALTER TABLE crm.draft FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS draft_read ON crm.draft;
 CREATE POLICY draft_read ON crm.draft FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant'));
 
 DROP POLICY IF EXISTS draft_write ON crm.draft;
 CREATE POLICY draft_write ON crm.draft FOR ALL
@@ -332,7 +332,7 @@ ALTER TABLE pm.project FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS project_read ON pm.project;
 CREATE POLICY project_read ON pm.project FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     OR pm.project.owner_id = app.current_user_id()
   );
 
@@ -351,7 +351,7 @@ ALTER TABLE pm.task FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS task_read ON pm.task;
 CREATE POLICY task_read ON pm.task FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     OR pm.task.owner_id = app.current_user_id()
   );
 
@@ -366,7 +366,7 @@ ALTER TABLE pm.task_dependency FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS task_dependency_read ON pm.task_dependency;
 CREATE POLICY task_dependency_read ON pm.task_dependency FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant'));
 
 DROP POLICY IF EXISTS task_dependency_write ON pm.task_dependency;
 CREATE POLICY task_dependency_write ON pm.task_dependency FOR ALL
@@ -380,7 +380,7 @@ ALTER TABLE pm.digest_send FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS digest_send_read ON pm.digest_send;
 CREATE POLICY digest_send_read ON pm.digest_send FOR SELECT
   USING (
-    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager', 'assistant')
     OR pm.digest_send.recipient_id = app.current_user_id()
   );
 
