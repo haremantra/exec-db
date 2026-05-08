@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -6,10 +5,11 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
+import { safeAnthropicStream } from "../apps/web/lib/anthropic.ts";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..");
 const VISION_PATH = join(REPO_ROOT, "docs", "vision.md");
-const MODEL = "claude-opus-4-7";
 const LOCK_TOKEN = "<<VISION_LOCKED>>";
 
 const SYSTEM_PROMPT = `You are interviewing the project owner of \`exec-db\` about a product pivot.
@@ -43,20 +43,25 @@ async function loadVision(): Promise<string> {
 
 function extractVision(text: string): string | null {
   const match = text.match(/<vision>([\s\S]*?)<\/vision>/);
-  return match ? match[1].trim() : null;
+  return match && match[1] ? match[1].trim() : null;
+}
+
+interface ConvoTurn {
+  role: "user" | "assistant";
+  text: string;
+  cacheable?: boolean;
 }
 
 async function main(): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env["ANTHROPIC_API_KEY"]) {
     console.error("ANTHROPIC_API_KEY is required.");
     process.exit(1);
   }
 
   await mkdir(dirname(VISION_PATH), { recursive: true });
 
-  const client = new Anthropic();
   const rl = createInterface({ input, output });
-  const messages: Anthropic.MessageParam[] = [];
+  const turns: ConvoTurn[] = [];
 
   console.log("vision-check — interactive interview");
   console.log("Type 'done' to exit. Updates docs/vision.md after every turn.\n");
@@ -65,42 +70,33 @@ async function main(): Promise<void> {
 
   while (true) {
     const currentVision = await loadVision();
-    messages.push({
+    turns.push({
       role: "user",
-      content: [
-        {
-          type: "text",
-          text: `Current docs/vision.md:\n\n\`\`\`markdown\n${currentVision}\n\`\`\`\n\nOwner says: ${userTurn}`,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
+      text: `Current docs/vision.md:\n\n\`\`\`markdown\n${currentVision}\n\`\`\`\n\nOwner says: ${userTurn}`,
+      cacheable: true,
     });
 
     process.stdout.write("\n> ");
 
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 8192,
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages,
+    const { stream } = safeAnthropicStream({
+      model: "opus",
+      maxTokens: 8192,
+      system: { text: SYSTEM_PROMPT, cacheable: true },
+      messages: turns,
     });
 
-    stream.on("text", (delta) => process.stdout.write(delta));
+    stream.on("text", (delta: string) => process.stdout.write(delta));
     const final = await stream.finalMessage();
     process.stdout.write("\n");
 
-    messages.push({ role: "assistant", content: final.content });
-
     const fullText = final.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
+      .filter(
+        (b: { type: string }): b is { type: "text"; text: string } => b.type === "text",
+      )
+      .map((b: { text: string }) => b.text)
       .join("");
+
+    turns.push({ role: "assistant", text: fullText });
 
     const vision = extractVision(fullText);
     if (vision) {
