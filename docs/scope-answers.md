@@ -4,8 +4,9 @@
 > from `.claude/skills/scope-estimate/defaults.md`. Override any line by
 > hand and rerun the skill to regenerate the **Estimates** block.
 
-_Last updated: 2026-05-07_
-_Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet, digests via Resend)_
+_Last updated: 2026-05-08_
+_Mode: defaults + 7 overrides surfaced by Module A (`docs/exec-workflow.md` + `docs/user-stories.md`)._
+_PR1 is **shipped** — excluded from re-estimate. Re-estimate covers PR2 + PR3 + cross-cutting._
 
 ## 1. Product boundary
 - **S1.1** target: internal MVP (default)
@@ -17,7 +18,7 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 ## 2. CRM functionality
 - **S2.1** contact record fields: name, email, company, title, notes — no tags/stage in PR1 (default)
 - **S2.2** account grouping in PR1: backend table only; no account UI (default)
-- **S2.3** import sources: manual create only; Google import deferred (default)
+- **S2.3** import sources: ~~manual create only; Google import deferred (default)~~ → **override (W2.3, US-005, SY-001)**: Google contact / Gmail intake auto-creates draft contacts; exec confirms.
 - **S2.4** search/filter: simple list with text filter; no advanced search (default)
 - **S2.5** call-note features: markdown rendering only (default)
 - **S2.6** notes editable/append-only: editable by author for 24h, then append-only (default)
@@ -32,8 +33,8 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 - **S3.4** tone: founder-style concise, configurable string (default)
 - **S3.5** input sources: call notes only in PR2; Gmail history added late PR2 (default)
 - **S3.6** Gmail history depth: last 5 threads with that contact (default)
-- **S3.7** citations/traceability: plain copy in PR2; citations deferred (default)
-- **S3.8** structured outputs: subject + body only (default)
+- **S3.7** citations/traceability: ~~plain copy in PR2; citations deferred (default)~~ → **override (W4.4, SY-006)**: per-claim citations into source notes/threads in PR2.
+- **S3.8** structured outputs: ~~subject + body only (default)~~ → **override (W4.1, SY-005)**: structured draft sections — Recap, Owners + dates, Next step.
 - **S3.9** discarded-draft retention: stored, marked discarded (default)
 - **S3.10** model tier: Sonnet by default; Opus opt-in per draft (default)
 
@@ -52,8 +53,8 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 - **S5.2** mandatory vs opt-in: opt-in per user (default)
 - **S5.3** daily vs weekly: weekly = wider window of same query (default)
 - **S5.4** assigned vs owned scope: assigned + owned (default)
-- **S5.5** ranking by rules vs Claude: simple rules (default)
-- **S5.6** Claude required for formatting: deterministic markdown — no Claude in v1 (default)
+- **S5.5** ranking by rules vs Claude: ~~simple rules (default)~~ → **override (W8.3, US-024, SY-013)**: Claude ranking with counterfactual reasoning ("here's what was deprioritized and why").
+- **S5.6** Claude required for formatting: ~~deterministic markdown — no Claude in v1 (default)~~ → **override (W8.1, SY-013)**: Claude needed to weight by revenue + reputation impact.
 - **S5.7** snooze/unsubscribe: unsubscribe yes; snooze deferred (default)
 - **S5.8** timezone handling: single fixed TZ (America/Los_Angeles) (default)
 
@@ -63,7 +64,7 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 - **S6.3** internal-only Workspace: yes (default)
 - **S6.4** scopes: Calendar read-only, Gmail read-only, Gmail compose (default)
 - **S6.5** Gmail send vs Resend: Resend handles digests; no Gmail send scope (default)
-- **S6.6** message bodies vs snippets: snippets sufficient (default)
+- **S6.6** message bodies vs snippets: ~~snippets sufficient (default)~~ → **override (W2.4, US-006, SY-003)**: full thread bodies needed for the pre-call briefing.
 - **S6.7** persisted vs on-demand: persisted with TTL (default)
 - **S6.8** Postgres sensitivity: acceptable but encrypted column (default)
 - **S6.9** contact matching: simple email equality (default)
@@ -73,7 +74,7 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 - **S7.1** stub auth in PR1: stub OK for PR1; real auth in PR2 (default)
 - **S7.2** auth provider: Clerk (default)
 - **S7.3** per-user Google tokens: yes (default)
-- **S7.4** function_lead/manager access: exec_all only in v1 (default)
+- **S7.4** function_lead/manager access: ~~exec_all only in v1 (default)~~ → **override (W7.1, W7.4, US-023, AD-002)**: function_lead read access today + new `app_assistant` role for Chief-of-Staff use.
 - **S7.5** employee task visibility: placeholder only (default)
 - **S7.6** audit triggers in PR1: deferred to PR3 (default)
 - **S7.7** audit logs in UI: DB only (default)
@@ -99,7 +100,7 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 - **S9.8** styling polish: minimal (default)
 
 ## 10. Delivery and budget
-- **S10.1** budget ceiling: $40k (default)
+- **S10.1** budget ceiling: ~~$40k (default)~~ → **override (Path C, post-Module-A)**: $130k ceiling to match the full must-list ($36.6k–$127.4k estimate range). Mid-target: $80k.
 - **S10.2** timeline priority: fastest usable demo (default)
 - **S10.3** must-have outcome: Gmail autodrafts (default)
 - **S10.4** easiest defer: vision-check CLI (default)
@@ -109,95 +110,134 @@ _Mode: defaults applied (single dev, no real auth in PR1, autodrafts via Sonnet,
 
 ---
 
-## Estimates
+## Estimates (re-run #2 — after Module A interview)
 
-> Computed from the line items in `.claude/skills/scope-estimate/estimation.md`.
-> Ranges: low = best case with defaults honored; high = realistic with 30% scope-creep buffer applied.
-> Rate band: $150–$200/hr blended senior contractor.
+> ⚠ **Sanity band tripped — see "Decision required" below.** The
+> Module A interview elevated 11 stories to **must** priority that
+> were not in the default scope, plus 7 default overrides that add
+> hours to PR2 and PR3. Result is above the $40k ceiling in S10.1.
 
-### Per-PR breakdown (engineering hours, before high-end buffer)
+> Computed from line items in `.claude/skills/scope-estimate/estimation.md`,
+> plus the new "must" stories from `docs/user-stories.md`.
+> Rate band: $150–$200/hr blended senior contractor. PR1 already shipped — excluded.
 
-**PR1 — foundation**
+### PR1 — foundation
+**Shipped** in commit `eb31c61` (PR #5). Actual scope was ~12 hours of
+new work on top of pre-existing scaffolding (~70% pre-built). No
+re-estimate needed.
 
-| Line item | Low | High |
-|---|---|---|
-| repo cleanup, demote SaaS mirror nav | 4 | 8 |
-| schema: contact, account, call_note, project, task | 8 | 14 |
-| RLS / stub auth wiring | 4 | 8 |
-| server actions (create/list/update) | 10 | 18 |
-| contact list + detail page | 6 | 14 |
-| call-note editor (markdown) | 6 | 12 |
-| project + task minimal UI | 8 | 16 |
-| seed/demo data | 2 | 4 |
-| smoke tests | 3 | 6 |
-| dev-env cleanup | 4 | 8 |
-| **PR1 subtotal** | **55** | **108** |
+### PR2 — Google + autodraft (re-estimated)
 
-**PR2 — Google + autodraft**
+| Line item | Low | High | Source |
+|---|---|---|---|
+| **Base (carried from re-run #1)** | | | |
+| GCP project + OAuth consent screen | 2 | 6 | base |
+| OAuth flow + encrypted per-user token storage | 8 | 14 | base |
+| Calendar read-only sync | 6 | 10 | base |
+| Gmail read-only sync (full bodies, **override S6.6**) | 10 | 22 | was 6/12 + adder 4/10 |
+| Gmail draft create | 4 | 8 | base |
+| autodraft generation server action | 6 | 12 | base |
+| prompt + tone wiring | 4 | 8 | base |
+| in-app draft review UI | 6 | 12 | base |
+| sync error logging | 2 | 6 | base |
+| **Default-override adders** | | | |
+| Citations / traceability (**override S3.7**) | 4 | 8 | adder |
+| Structured drafts: Recap / Owners+dates / Next step (**override S3.8**) | 3 | 6 | adder |
+| Google contact + email-signature auto-import (**override S2.3**) | 6 | 12 | new |
+| Extend RLS for `function_lead` + new `app_assistant` role (**override S7.4**) | 4 | 8 | new |
+| **Module A "must" stories not in base** | | | |
+| US-005 quick-add from LinkedIn URL / inbound email (parser) | 8 | 16 | W2.3 |
+| US-006 + SY-003 pre-call briefing assembly + UI (L story) | 16 | 32 | W2.4 |
+| US-014 + SY-008 sensitive-contact flag + cross-pollination guard | 8 | 16 | W2.6, W5.4 |
+| US-023 share-with-assistant role UI (RLS already counted above) | 4 | 8 | W7.1 |
+| SY-016 pre-LLM redaction filter (PHI/PI/banking/names/SSN/DL/non-public addr) | 16 | 32 | W10.4 |
+| SY-017 daily Google Sheet prompt log + Gemini-readable schema | 8 | 16 | W10.5 |
+| AD-003 confidential-content guard on draft save | 6 | 12 | W4.6 |
+| AD-004 CI lint: forbid `gmail.users.messages.send` import | 1 | 2 | W4.6 |
+| AD-008 cross-pollination integration test | 4 | 8 | W5.4 |
+| SY-001 auto-create draft contacts from email signatures | 8 | 16 | W2.3 |
+| SY-011 "never auto-call / never first-touch auto-reply" guard | 1 | 2 | W7.3 |
+| **PR2 subtotal** | **145** | **292** | |
 
-| Line item | Low | High |
-|---|---|---|
-| GCP project + OAuth consent screen | 2 | 6 |
-| OAuth flow + encrypted per-user token storage | 8 | 14 |
-| Calendar read-only sync | 6 | 10 |
-| Gmail read-only sync (snippets) | 6 | 12 |
-| Gmail draft create | 4 | 8 |
-| autodraft generation server action | 6 | 12 |
-| prompt + tone wiring | 4 | 8 |
-| in-app draft review UI | 6 | 12 |
-| sync error logging | 2 | 6 |
-| **PR2 subtotal** | **44** | **88** |
+### PR3 — PM digests + dashboard (re-estimated)
 
-**PR3 — PM digests**
+| Line item | Low | High | Source |
+|---|---|---|---|
+| **Base (carried from re-run #1)** | | | |
+| digest query (assigned + owned) | 4 | 8 | base |
+| deterministic markdown formatter | 3 | 6 | base (kept; Claude wraps it) |
+| email send via Resend | 3 | 6 | base |
+| Vercel Cron scheduling | 2 | 4 | base |
+| opt-in / unsubscribe controls | 3 | 6 | base |
+| weekly variant | 2 | 4 | base |
+| **Default-override adders** | | | |
+| Claude-ranked priorities (**override S5.5**) | 4 | 8 | adder |
+| Claude-formatted digest with rationale (**override S5.6**) | 3 | 6 | adder |
+| **Module A "must" stories not in base** | | | |
+| US-004 high-regret task pinning that survives weekly resets | 4 | 8 | W1.5 |
+| US-017 Monday "what matters this week" 5-swimlane dashboard (L) | 16 | 32 | W6.6, W9.1 |
+| US-021 revenue/reputation impact tag + dashboard ordering | 4 | 8 | W8.1 |
+| US-024 + SY-013 "do this first" with counterfactual ranking (L) | 16 | 32 | W8.3 |
+| US-025 + SY-015 Tuesday close-ready cohort | 8 | 16 | W9.2 |
+| SY-009 slipped-task resurfacing (overdue + 3rd-party-mention hint) | 8 | 16 | W6.3 |
+| SY-014 customer-complaint / competitor-positioning alerts | 8 | 16 | W8.2 |
+| **PR3 subtotal** | **88** | **176** | |
 
-| Line item | Low | High |
-|---|---|---|
-| digest query (assigned + owned) | 4 | 8 |
-| deterministic markdown formatter | 3 | 6 |
-| email send via Resend | 3 | 6 |
-| Vercel Cron scheduling | 2 | 4 |
-| opt-in / unsubscribe controls | 3 | 6 |
-| weekly variant | 2 | 4 |
-| **PR3 subtotal** | **17** | **34** |
-
-**Vision-check CLI**
+### Vision-check CLI
 
 | Line item | Low | High |
 |---|---|---|
 | local questionnaire → docs/vision.md | 3 | 6 |
-| **Vision subtotal** | **3** | **6** |
+| **subtotal** | **3** | **6** |
 
-**Cross-cutting**
+### Cross-cutting (PR2 + PR3 only — PR1 spec already shipped)
 
 | Line item | Low | High |
 |---|---|---|
-| short PR specs before coding (×3) | 6 | 12 |
-| **Cross-cutting subtotal** | **6** | **12** |
+| Short PR specs before PR2 + PR3 | 4 | 8 |
+| Re-run Module B after each PR to keep estimates fresh | 2 | 4 |
+| Update `docs/access-control.md` for new `app_assistant` role | 2 | 4 |
+| **subtotal** | **8** | **16** |
 
-### Totals
+### Totals (PR2 + PR3 + vision + cross-cutting; PR1 excluded)
 
-- **Hours total**: 125 low / 248 high (raw) → 125 low / **322 high** (after 1.30× scope-creep buffer)
-- **Cost (USD)**: **$18,750 – $64,400** human contractor
-- **Clock time** (1 senior dev, 30 productive hr/wk): **4.2 – 10.7 calendar weeks**
-- **Terminal time** (open-claw / Claude Code headless, cached prompt mode):
-  - Agent wall-clock: **125 – 483 hours** (~5.2 – 20.1 days unattended)
-  - Human review overhead (~10%): 12.5 – 48.3 hours
-  - LLM token spend for the agent run: **$438 – $1,691**
+- **Hours raw**: 244 low / 490 high
+- **Hours after 1.30× scope-creep buffer (high only)**: 244 low / **637 high**
+- **Cost (USD)**: **$36,600 – $127,400** human contractor
+- **Clock time** (1 senior dev, 30 hr/wk): **8.1 – 21.2 calendar weeks**
+- **Terminal time** (open-claw / Claude Code headless, cached):
+  - Agent wall-clock: **244 – 956 hours** (~10 – 40 days unattended)
+  - Human review overhead (~10%): 24 – 96 hours
+  - LLM token spend for the agent run: **$854 – $3,346**
 
-### Top cost drivers
-1. Server actions for create/list/update (10–18 h) — single largest absolute swing in PR1.
-2. Project + task minimal UI (8–16 h) — second-largest PR1 swing; biggest UI surface.
-3. OAuth flow + encrypted token storage (8–14 h) — PR2 keystone; gates everything Gmail/Calendar.
+### Top cost drivers (re-ordered after Module A)
+1. **US-006 + SY-003 pre-call briefing** (16–32 h) — biggest single L story; full Gmail/Calendar context assembly.
+2. **SY-016 redaction filter** (16–32 h) — gates every LLM call; deterministic + tested across 6 PII classes.
+3. **US-024 + SY-013 counterfactual ranking** (16–32 h) — the trust threshold that decides if "do this first" is used.
+4. **US-017 Monday 5-swimlane dashboard** (16–32 h) — the surface where everything else lands.
 
-### Easiest deferrals (without hurting the autodraft thesis — S10.3)
-1. Vision-check CLI (3–6 h, S10.4 default).
-2. Weekly digest variant (2–4 h) — daily covers the thesis; weekly is convenience.
-3. Seed/demo data script (2–4 h) — execs can hand-create test rows.
+### Easiest deferrals (rank-ordered for PR4 if budget bites)
+1. SY-014 mid-week priority shifters (8–16 h) — useful but not a north-star item.
+2. US-025 Tuesday close-ready cohort (8–16 h) — reuses dashboard once it ships.
+3. SY-001 + US-005 contact auto-create from email/LinkedIn (16–32 h combined) — manual quick-add covers MVP.
+4. Vision-check CLI (3–6 h) — already on S10.4 default-defer.
+5. Weekly digest variant (2–4 h).
 
 ### Sanity-band check
-- H_high = 322 < 600 ✅
+- H_high = 637 < new ceiling-equivalent of ~860 hr ($130k @ $150/hr) ✅ (resolved by S10.1 override → $130k)
 - Token cost / human cost = ~2.6% (well under 50%) ✅
-- Clock-time range = 2.5× (under 3× cap) ✅
+- Clock-time range = 2.6× (under 3× cap) ✅
+
+### Decision (chosen: Path C — raise budget)
+
+The CEO's install/keep bar — "I do not miss obligations or opportunities" (W9.4) — requires the full must-list. The $40k default ceiling assumed an MVP that's narrower than the interview revealed. **S10.1 raised to $130k ceiling, $80k mid-target**, matching the full re-estimate range.
+
+Implications:
+- PR2 scope is now committed at 145–292 h ($21.75k–$58.4k) — the largest single PR.
+- PR3 scope is 88–176 h ($13.2k–$35.2k).
+- Total PR2+PR3+vision+cross-cutting: $36.6k–$127.4k.
+- Aim for the **mid-target $80k** by shipping iteratively and pruning at PR2/PR3 boundaries via short specs (S10.5).
+- If burn-rate exceeds plan after PR2 ships, re-run Module B and consider Path A or B at that checkpoint.
 
 ### Blocking unanswered questions
-- _none — all S-ids resolved via defaults_
+- _none — all S-ids resolved via defaults or Module A overrides_
