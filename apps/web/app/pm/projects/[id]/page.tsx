@@ -214,6 +214,25 @@ export default async function ProjectDetailPage({
                         : "border-neutral-200 dark:border-neutral-700"
                     }`}
                   >
+                    {/* Needs check-in badge (R2 — SY-010, US-020, W6.4).
+                        Shown when awaiting_response_until is set and has passed. */}
+                    {t.awaitingResponseUntil &&
+                      t.awaitingResponseUntil < new Date() && (
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="inline-flex items-center rounded bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+                            Needs check-in
+                          </span>
+                          {/* Draft check-in: links to the contact-page autodraft flow.
+                              The task title is passed as a URL query parameter so the
+                              contact page can pre-fill the draft prompt context. */}
+                          <a
+                            href={`/crm/contacts?draft_checkin=1&task_title=${encodeURIComponent(t.title)}`}
+                            className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200"
+                          >
+                            Draft check-in
+                          </a>
+                        </div>
+                      )}
                     <div className="flex items-start justify-between gap-1">
                       <div className="font-medium leading-tight">{t.title}</div>
                       {/* Pin toggle (K2 — exec_all only) */}
