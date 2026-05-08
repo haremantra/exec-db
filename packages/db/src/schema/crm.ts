@@ -180,6 +180,12 @@ export const callNote = crm.table(
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     markdown: text("markdown").notNull(),
     authorId: uuid("author_id").notNull(),
+    /**
+     * "Remember this" star (US-011 / S2 PR3).
+     * Starred notes sort to the top of the call-notes list within the same
+     * date range (star wins over recency tie).
+     */
+    isStarred: boolean("is_starred").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`now()`),
@@ -221,6 +227,13 @@ export const emailThread = crm.table(
     snippet: text("snippet"),
     /** Full thread body — S6.6 override: store complete body for briefing/draft context. */
     bodyFull: text("body_full"),
+    /**
+     * Pin internal-ops Gmail threads (US-016 / S3 PR3).
+     * Pinned threads are promoted to a "Decisions" panel above the regular
+     * thread list on the contact detail page.  They also remain in the
+     * regular list.
+     */
+    isPinned: boolean("is_pinned").notNull().default(false),
     ...lineage,
   },
   (t) => [
