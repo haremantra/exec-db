@@ -104,6 +104,61 @@ Enforcement is two-layered:
 
 The invariant is proven by `apps/web/__tests__/cross-pollination.test.ts` (10 tests), which runs on every push via CI.
 
+## OAuth token encryption (PR2 — Stream A)
+
+### Storage model
+
+Google OAuth tokens for each user are stored in `crm.oauth_token`. The columns
+`access_token_enc` and `refresh_token_enc` are `bytea` values produced by
+PostgreSQL's **pgcrypto** extension:
+
+```sql
+pgp_sym_encrypt(plaintext_token::text, $GOOGLE_TOKEN_ENC_KEY)
+```
+
+Decryption happens at query time inside the DB connection:
+
+```sql
+pgp_sym_decrypt(access_token_enc, $GOOGLE_TOKEN_ENC_KEY)::text
+```
+
+The symmetric key (`GOOGLE_TOKEN_ENC_KEY`) is **never stored in the database**.
+It lives exclusively in the `.env` file on the server and is injected as a
+query parameter at runtime via `apps/web/lib/google.ts`.
+
+### Key requirements
+
+- Minimum 32 bytes of entropy (use `openssl rand -base64 32` to generate).
+- Rotate by: (1) generate a new key, (2) re-encrypt all rows in a transaction,
+  (3) deploy the new key.
+- Loss of the key means all stored tokens become unreadable — users must
+  re-authorize via `/api/auth/google`.
+
+### Of-record account semantics (AD-007)
+
+Each user may connect multiple Google accounts (personal + professional). The
+`is_of_record` flag marks the single account whose tokens are used for all
+Google API calls. `googleClientForUser()` always selects the row with
+`is_of_record = true`.
+
+- First account connected automatically gets `is_of_record = true`.
+- To switch of-record account: update the row (exec-only via RLS) or add a
+  future settings UI.
+- RLS on `crm.oauth_token`: users may only read/write their own rows;
+  `exec_all` can SELECT all (audit visibility) and DELETE (revocation).
+
+### Scope justifications
+
+| Scope | Justification |
+|---|---|
+| `calendar.readonly` | Read primary calendar events to populate `crm.calendar_event` (S6.4, S6.7). |
+| `gmail.readonly` | Read thread bodies for pre-call briefing context (S6.6 override, W2.4). |
+| `gmail.compose` | Create drafts in Gmail. **Never sends.** `gmail.send` is explicitly excluded from the consent screen and forbidden in code (AD-004). |
+| `openid`, `email` | Identify which Google account is being connected (userinfo). |
+
+`gmail.send` is **never requested** and **never called**. CI lint (stream J)
+blocks any future introduction of `users.messages.send`.
+
 ## SOC 2 alignment
 
 The above plus: change management on `packages/db` migrations (PR + review + audit), backup PITR with monthly restore drill, and a sub-processor list checked into `docs/`. Cheap to do from day one; expensive to retrofit.

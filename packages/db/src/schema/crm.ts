@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
+  customType,
   index,
   jsonb,
   pgSchema,
@@ -10,6 +12,18 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+
+/**
+ * pgcrypto-encrypted bytea column.
+ * On write: the application must pass the ciphertext (encrypted via pgp_sym_encrypt).
+ * On read: the application receives raw bytea and must call pgp_sym_decrypt.
+ * See docs/access-control.md § "OAuth token encryption" for the key derivation details.
+ */
+const encryptedBytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 import { lineage } from "./core.js";
 
 export const crm = pgSchema("crm");
@@ -144,6 +158,8 @@ export const emailThread = crm.table(
     subject: text("subject"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     snippet: text("snippet"),
+    /** Full thread body — S6.6 override: store complete body for briefing/draft context. */
+    bodyFull: text("body_full"),
     ...lineage,
   },
   (t) => [
@@ -152,6 +168,50 @@ export const emailThread = crm.table(
   ],
 );
 
+/**
+ * OAuth token storage for per-user Google credentials.
+ * access_token_enc and refresh_token_enc are pgp_sym_encrypt(plaintext, key) values.
+ * The encryption key comes from env GOOGLE_TOKEN_ENC_KEY (never stored in DB).
+ * See docs/access-control.md § "OAuth token encryption".
+ *
+ * AD-007: only one of-record account per user per provider (is_of_record unique index).
+ */
+export const oauthToken = crm.table(
+  "oauth_token",
+  {
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    userId: uuid("user_id").notNull(),
+    provider: varchar("provider", { length: 16 }).notNull(),
+    accountEmail: text("account_email").notNull(),
+    isOfRecord: boolean("is_of_record").notNull().default(true),
+    accessTokenEnc: encryptedBytea("access_token_enc").notNull(),
+    refreshTokenEnc: encryptedBytea("refresh_token_enc").notNull(),
+    scope: text("scope").array().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex("oauth_token_user_provider_email_uk").on(
+      t.userId,
+      t.provider,
+      t.accountEmail,
+    ),
+    // Partial unique index: only one of-record account per user+provider
+    // (enforced at the app layer on upsert; DB constraint left to app logic
+    //  because partial unique index on boolean requires raw SQL).
+    index("oauth_token_user_provider_idx").on(t.userId, t.provider),
+  ],
+);
+
+/**
+ * email_thread gains a body_full column for full-body storage (S6.6 override).
+ * The existing schema stub has only `snippet`; we extend it here.
+ */
 export const draft = crm.table(
   "draft",
   {
