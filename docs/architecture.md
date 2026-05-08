@@ -1,5 +1,18 @@
 # Architecture
 
+## PR2 invariants — verified by tests + CI
+
+Six cross-cutting properties that no PR2 commit is allowed to break. Each is enforced by at least one test and/or a CI step.
+
+| # | Invariant | Story | Enforced by | Test / CI location |
+|---|---|---|---|---|
+| 1 | **Never auto-send.** No `gmail.users.messages.send` call anywhere in the codebase. | AD-004 | CI grep step (`Forbid gmail.users.messages.send` in `.github/workflows/ci.yml`) + `createGmailDraft` in `apps/web/lib/google-gmail.ts` only calls `users.drafts.create`. | CI step added in PR2-J; `apps/web/__tests__/autodraft.test.ts` (send-path rejection). |
+| 2 | **Redaction before every LLM call.** Raw text never reaches the Anthropic SDK. | SY-016 | `safeAnthropic()` in `apps/web/lib/anthropic.ts` calls `redact()` before the SDK call. | `apps/web/__tests__/redaction.test.ts` (6 PII classes); `apps/web/__tests__/anthropic.test.ts` (wrapper spy). |
+| 3 | **No contact-data cross-pollination.** A draft/briefing for contact A never retrieves contact B's notes/threads. | AD-008, SY-008 | `getContactContext()` in `apps/web/lib/contact-context.ts` filters all queries by `contactId` and throws on any row mismatch. | `apps/web/__tests__/cross-pollination.test.ts` (10 tests). |
+| 4 | **Every LLM call produces an audit row.** `recordLlmCall()` is invoked on every Anthropic call. | SY-017 | `safeAnthropic()` calls `recordLlmCall()` unconditionally after the SDK returns. | `apps/web/__tests__/audit-llm.test.ts` (spy verifies every call path). |
+| 5 | **Sensitive contacts are excluded** from search, drafts, digests, and LLM context. | US-014, AD-001, SY-008 | `crm.is_sensitive_for_role()` in `packages/db/src/rls/policies.sql`; RLS on all CRM tables. | `apps/web/__tests__/assistant-grant.test.ts` (sensitive-flag regression tests); `apps/web/__tests__/cross-pollination.test.ts`. |
+| 6 | **audit.llm_call is append-only.** No UPDATE or DELETE is possible, even by superusers. | AD-005 | `BEFORE UPDATE OR DELETE` trigger `audit.llm_call_no_mutate` in `packages/db/src/rls/policies.sql` raises an exception. | Trigger installed in policies.sql (PR2-J); verified by manual migration. |
+
 ## Two tiers, not one
 
 | Tier | Purpose | Tech |

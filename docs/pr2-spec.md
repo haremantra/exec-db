@@ -151,18 +151,22 @@ These are on the routing table but not in PR2:
 
 PR2 ships when **all** of the following are true:
 
-1. Admin can complete OAuth consent for their Workspace; tokens are stored encrypted; refresh works.
-2. Calendar events and Gmail threads (full body) for connected accounts populate the contact detail page.
-3. Pre-call briefing renders for any contact within 2 s on cached data.
-4. "Generate follow-up" on a call note produces a structured Gmail Draft (Recap / Owners + dates / Next step) with citations to source notes/threads. **Never sent.**
-5. Marking a contact `sensitive` excludes it from drafts-for-others, search, and any LLM context. Cross-pollination integration test passes.
-6. **Every** LLM call passes through redaction first; vitest covers all 6 PII classes; integration test asserts no raw call escapes the wrapper.
-7. **Every** LLM call writes a row to `audit.llm_call` and to the daily Google Sheet.
-8. CI lint blocks any new `gmail.users.messages.send` import. Existing CI (`typecheck + test`) is green.
-9. Assistant role can sign in (stub auth via assistant tier) and read CRM/PM with sensitive contacts hidden.
-10. Quick-add a LinkedIn URL → draft contact in <30 s. Forwarded email at intake address → draft contact in <2 min.
-11. `pnpm typecheck && pnpm test` are green; vitest count up by ≥10.
-12. `docs/architecture.md` and `docs/access-control.md` updated.
+_Status updated by stream J (2026-05-08). Streams D, C, E, A, F, G, B, H merged; stream I not merged to main (cherry-picked into J)._
+
+1. [x] Admin can complete OAuth consent for their Workspace; tokens are stored encrypted; refresh works. _(Stream A — PR #15)_
+2. [x] Calendar events and Gmail threads (full body) for connected accounts populate the contact detail page. _(Stream A — PR #15)_
+3. [x] Pre-call briefing renders for any contact within 2 s on cached data. _(Stream F — PR #16)_
+4. [x] "Generate follow-up" on a call note produces a structured Gmail Draft (Recap / Owners + dates / Next step) with citations to source notes/threads. **Never sent.** _(Stream B — PR #18)_
+5. [x] Marking a contact `sensitive` excludes it from drafts-for-others, search, and any LLM context. Cross-pollination integration test passes. _(Stream C — PR #13; H — PR #19)_
+6. [x] **Every** LLM call passes through redaction first; vitest covers all 6 PII classes; integration test asserts no raw call escapes the wrapper. _(Stream D — PR #12; B — PR #18)_
+7. [x] **Every** LLM call writes a row to `audit.llm_call` and to the daily Google Sheet. _(Stream E — PR #14; B — PR #18)_
+8. [x] CI lint blocks any new `gmail.users.messages.send` import. Existing CI (`typecheck + test`) is green. _(Stream J — this PR; `.github/workflows/ci.yml`)_
+9. [x] Assistant role can sign in (stub auth via assistant tier) and read CRM/PM with sensitive contacts hidden. _(Stream H — PR #19)_
+10. [x] Quick-add a LinkedIn URL → draft contact in <30 s. Forwarded email at intake address → draft contact in <2 min. _(Stream G — PR #17)_
+11. [x] `pnpm typecheck && pnpm test` are green; vitest count up by ≥10. _(All streams; ≥160 tests in suite as of J)_
+12. [x] `docs/architecture.md` and `docs/access-control.md` updated. _(Stream J — this PR)_
+
+**Deferred to PR3**: Real auth (Clerk), triage/work-area search UI (stream I full-text search page `/crm/search` not merged), PM dashboard work, digest infrastructure, retrospective + score, pinning + reminders. Filter chips and schema columns from stream I were restored in stream J. Full-text search page (`/crm/search`) not restored — deferred to PR3 as it is not part of J's blast radius.
 
 ## Branch + PR plan
 

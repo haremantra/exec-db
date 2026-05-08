@@ -75,6 +75,16 @@ AND EXISTS (SELECT 1 FROM crm.contact WHERE id = p_contact_id AND sensitive_flag
 
 Policies on `crm.call_note`, `crm.calendar_event`, and `crm.email_thread` call this function so that notes, events, and threads belonging to a sensitive contact are also hidden from non-exec roles.
 
+### RLS recursion safety (PR2-J)
+
+**Concern (Copilot review on PR #19):** `crm.is_sensitive_for_role()` is `SECURITY DEFINER` and reads from `crm.contact`, which has RLS enabled.  Could Postgres recurse infinitely — outer query triggers policy, policy calls function, function queries table, table policy fires again?
+
+**Analysis:** No recursion occurs.  The function is `SECURITY DEFINER`, so its body executes under the privileges of its *definer* role (the migration role or schema owner, which has `BYPASSRLS`).  When a `BYPASSRLS` role queries `crm.contact` inside the function body, Postgres does not evaluate RLS on that inner query at all.  The cycle is broken at the first level.
+
+Additionally, the function uses `SET search_path = crm, public`, which prevents a malicious caller from injecting a shadow `crm.contact` view to subvert the lookup.
+
+**Decision:** The implementation is safe.  No policy logic was changed.  The analysis is also recorded as a comment directly in `packages/db/src/rls/policies.sql` for future reviewers.
+
 ### Setting / clearing the flag
 
 Only `exec_all` tier may call the `setSensitiveFlag(contactId, formData)` server action.  The action:
