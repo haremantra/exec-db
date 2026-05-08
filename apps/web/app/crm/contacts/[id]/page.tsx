@@ -2,6 +2,7 @@ import { schema } from "@exec-db/db";
 import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { getPreCallBriefing } from "@/lib/briefing";
 import { query } from "@/lib/db";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -18,6 +19,9 @@ import {
 import type { SensitiveFlag, AutodraftTone, DraftCitation } from "../actions";
 
 const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Threshold in milliseconds for "starting soon" badge (5 minutes). */
+const STARTING_SOON_MS = 5 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +80,25 @@ export default async function ContactDetailPage({
 
   if (!data) notFound();
 
+  // ── Pre-call briefing (F1 / F2) ──────────────────────────────────────────
+  // Assembled server-side from contact-context; cached 60 s per (user, contact).
+  // On any non-invariant error, getPreCallBriefing returns a partial briefing
+  // with null fields — never throws to the page render (F3 / US-006).
+  const briefing = await getPreCallBriefing(id, session);
+
+  // ── "Starting in N min" badge (F3 / SY-003) ──────────────────────────────
+  // Computed from the latest synced calendar event referencing this contact.
+  // No timer — derived server-side from the most recent sync snapshot.
+  const now = Date.now();
+  const upcomingEvent = data.events.find((e) => {
+    if (!e.startsAt) return false;
+    const delta = e.startsAt.getTime() - now;
+    return delta >= 0 && delta <= STARTING_SOON_MS;
+  });
+  const startingInMinutes = upcomingEvent?.startsAt
+    ? Math.ceil((upcomingEvent.startsAt.getTime() - now) / 60_000)
+    : null;
+
   const canWrite = session.tier === "exec_all";
   const addNote = addCallNote.bind(null, id);
   const setFlag = setSensitiveFlag.bind(null, id);
@@ -128,6 +151,134 @@ export default async function ContactDetailPage({
 
   return (
     <div className="space-y-8">
+      {/*
+        ══════════════════════════════════════════════════════════════════════
+        BRIEFING SECTION — Stream F (pre-call briefing)
+        Placed at the very TOP, BEFORE the <header>, so Stream B
+        ("Generate follow-up" button + draft review UI) owns the bottom
+        half of the page exclusively and edits there will not conflict.
+        ══════════════════════════════════════════════════════════════════════
+      */}
+
+      {/* "Starting soon" badge — rendered server-side; no JS timer needed */}
+      {startingInMinutes !== null && (
+        <div
+          role="status"
+          className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200"
+        >
+          <span
+            className="h-2 w-2 rounded-full bg-green-500"
+            aria-hidden="true"
+          />
+          Starting in {startingInMinutes} min
+        </div>
+      )}
+
+      {/* Briefing panel — collapsible, default expanded (US-006 / F2) */}
+      <details open>
+        <summary className="cursor-pointer select-none text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+          Briefing
+        </summary>
+
+        {/* 5-field grid (US-006) */}
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Field 1 — Current title */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Title
+            </p>
+            <p className="mt-0.5 text-sm">
+              {briefing.currentTitle ?? <span className="text-neutral-400">—</span>}
+            </p>
+          </div>
+
+          {/* Field 2 — Current company */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Company
+            </p>
+            <p className="mt-0.5 text-sm">
+              {briefing.currentCompany ?? <span className="text-neutral-400">—</span>}
+            </p>
+          </div>
+
+          {/* Field 3 — Last 3 notes */}
+          <div className="sm:col-span-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Last 3 call notes
+            </p>
+            {briefing.lastNotes.length === 0 ? (
+              <p className="mt-0.5 text-sm text-neutral-400">—</p>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {briefing.lastNotes.map((n, i) => (
+                  <li key={i} className="flex gap-2 text-sm">
+                    <span className="shrink-0 text-neutral-400">
+                      {n.occurredAt.slice(0, 10)}
+                    </span>
+                    <span className="truncate">{n.firstLine || "—"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Field 4 — Last 5 thread subjects */}
+          <div className="sm:col-span-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Last 5 email threads
+            </p>
+            {briefing.lastThreadSubjects.length === 0 ? (
+              <p className="mt-0.5 text-sm text-neutral-400">—</p>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {briefing.lastThreadSubjects.map((t, i) => (
+                  <li key={i} className="flex gap-2 text-sm">
+                    <span className="shrink-0 text-neutral-400">
+                      {t.lastMessageAt.slice(0, 10)}
+                    </span>
+                    <span className="truncate">{t.subject || "—"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Field 5 — Public perspective links */}
+          <div className="sm:col-span-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Public perspective
+            </p>
+            {briefing.publicPerspectiveLinks.length === 0 ? (
+              <p className="mt-0.5 text-sm text-neutral-400">—</p>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {briefing.publicPerspectiveLinks.map((link, i) => (
+                  <li key={i}>
+                    <a
+                      href={link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 underline hover:text-blue-800 dark:text-blue-400"
+                    >
+                      {link}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </details>
+
+      {/*
+        ══════════════════════════════════════════════════════════════════════
+        CONTACT HEADER and EXISTING SECTIONS below this line.
+        Stream B ("Generate follow-up" + draft review UI) edits in this
+        lower half; Stream F only owns the <details> block above.
+        ══════════════════════════════════════════════════════════════════════
+      */}
+
       {/* Sensitive-contact banner — visible to exec_all when a flag is set */}
       {canWrite && currentFlag && (
         <div

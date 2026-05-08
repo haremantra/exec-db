@@ -14,6 +14,30 @@ import { assertSafeForGmail } from "@/lib/draft-guard";
 import { assertNotAutomatedOutbound } from "@/lib/scheduler-guard";
 import { createGmailDraft } from "@/lib/google-gmail";
 
+// ---------------------------------------------------------------------------
+// LinkedIn quick-add helpers (G1 — US-005)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex for valid LinkedIn profile URLs.
+ * Accepts: https://linkedin.com/in/slug  and https://www.linkedin.com/in/slug
+ * with an optional trailing slash.  Query strings are rejected.
+ */
+const LINKEDIN_URL_RE = /^https:\/\/(www\.)?linkedin\.com\/in\/([^/?#]+)\/?$/;
+
+/**
+ * Convert a LinkedIn slug to a best-effort display name.
+ * "alice-doe"  → "Alice Doe"
+ * "AliceDoe"   → "AliceDoe"  (no hyphens: leave as-is)
+ */
+export function slugToName(slug: string): string {
+  return slug
+    .split("-")
+    .map((part) => (part.length > 0 ? part[0]!.toUpperCase() + part.slice(1) : ""))
+    .join(" ")
+    .trim();
+}
+
 // Re-export so UI layers can import from one place.
 export type { SensitiveFlag };
 export { SENSITIVE_FLAG_VALUES };
@@ -25,6 +49,92 @@ function ctx(session: Awaited<ReturnType<typeof getSession>>) {
     tier: session.tier,
     functionArea: session.functionArea,
   };
+}
+
+/**
+ * Quick-add a draft contact from a LinkedIn profile URL (G1 — US-005).
+ *
+ * - Validates URL against LINKEDIN_URL_RE.
+ * - Parses the profile slug into a best-effort name ("alice-doe" → "Alice Doe").
+ * - Creates the contact with isDraft=true and a placeholder email derived
+ *   from the slug (exec must confirm + fill the real email on the detail page).
+ * - Redirects to the new contact's detail page on success.
+ *
+ * No network call to linkedin.com is made.  Slug-only parsing per spec G1.
+ */
+export async function quickAddFromLinkedIn(formData: FormData): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: quickAddFromLinkedIn requires exec_all tier");
+  }
+
+  const raw = String(formData.get("linkedinUrl") ?? "").trim();
+  const match = LINKEDIN_URL_RE.exec(raw);
+  if (!match) {
+    throw new Error("Invalid LinkedIn URL. Expected: https://linkedin.com/in/<slug>");
+  }
+
+  const slug = match[2]!;
+  const fullName = slugToName(slug);
+  // Placeholder email: slug@linkedin-draft.invalid
+  // exec must update this on the detail page before confirming.
+  const primaryEmail = `${slug}@linkedin-draft.invalid`;
+
+  const [row] = await query(ctx(session), (tx) =>
+    tx
+      .insert(schema.contact)
+      .values({
+        fullName,
+        primaryEmail,
+        company: null,
+        roleTitle: null,
+        isDraft: true,
+        createdBy: session.userId,
+      })
+      .returning({ id: schema.contact.id }),
+  );
+
+  revalidatePath("/crm/contacts");
+  if (row) redirect(`/crm/contacts/${row.id}`);
+}
+
+/**
+ * Confirm a draft contact (G4 — US-005).
+ * Sets isDraft=false.  Only exec_all may confirm.
+ */
+export async function confirmDraftContact(contactId: string): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: confirmDraftContact requires exec_all tier");
+  }
+
+  await query(ctx(session), (tx) =>
+    tx
+      .update(schema.contact)
+      .set({ isDraft: false, updatedAt: new Date() })
+      .where(and(eq(schema.contact.id, contactId), eq(schema.contact.isDraft, true))),
+  );
+
+  revalidatePath("/crm/contacts");
+}
+
+/**
+ * Discard a draft contact (G4 — US-005).
+ * Deletes the row entirely.  Only exec_all may discard.
+ */
+export async function discardDraftContact(contactId: string): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: discardDraftContact requires exec_all tier");
+  }
+
+  await query(ctx(session), (tx) =>
+    tx
+      .delete(schema.contact)
+      .where(and(eq(schema.contact.id, contactId), eq(schema.contact.isDraft, true))),
+  );
+
+  revalidatePath("/crm/contacts");
 }
 
 export async function createContact(formData: FormData): Promise<void> {
