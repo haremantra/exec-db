@@ -13,6 +13,8 @@ import {
   generateAutodraft,
   saveDraftToGmail,
   saveDraftToGmailConfirmed,
+  toggleNoteStar,
+  togglePinnedThread,
   SENSITIVE_FLAG_VALUES,
   AUTODRAFT_TONE_VALUES,
 } from "../actions";
@@ -47,11 +49,17 @@ export default async function ContactDetailPage({
     const [c] = await tx.select().from(schema.contact).where(eq(schema.contact.id, id)).limit(1);
     if (!c) return null;
 
+    // Starred notes sort first within the same date range (US-011).
+    // We sort by (is_starred DESC, occurred_at DESC) so starred notes bubble
+    // to the top while recency determines order within each group.
     const notes = await tx
       .select()
       .from(schema.callNote)
       .where(eq(schema.callNote.contactId, id))
-      .orderBy(desc(schema.callNote.occurredAt))
+      .orderBy(
+        desc(schema.callNote.isStarred),
+        desc(schema.callNote.occurredAt),
+      )
       .limit(50);
 
     const events = await tx
@@ -508,22 +516,45 @@ export default async function ContactDetailPage({
             return (
               <li
                 key={n.id}
-                className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
+                id={`note-${n.id}`}
+                className={`rounded-md border p-3 text-sm ${
+                  n.isStarred
+                    ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950"
+                    : "border-neutral-200 dark:border-neutral-800"
+                }`}
               >
                 <div className="mb-1 flex items-center justify-between text-xs text-neutral-500">
                   <span>{n.occurredAt.toISOString()}</span>
-                  {canEdit && !isEditing && (
-                    <a
-                      href={`?edit=${n.id}#note-${n.id}`}
-                      id={`note-${n.id}`}
-                      className="text-xs underline hover:text-neutral-900 dark:hover:text-neutral-200"
-                    >
-                      Edit
-                    </a>
-                  )}
-                  {!withinWindow && isAuthor && (
-                    <span className="text-xs italic">Edit window expired</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* Star button (US-011 / S2) */}
+                    {canWrite && (
+                      <form action={toggleNoteStar.bind(null, n.id, id)}>
+                        <button
+                          type="submit"
+                          title={n.isStarred ? "Unstar note" : "Remember this — star note"}
+                          aria-label={n.isStarred ? "Unstar note" : "Star note"}
+                          className={`text-sm leading-none transition-colors ${
+                            n.isStarred
+                              ? "text-amber-500 hover:text-amber-700"
+                              : "text-neutral-300 hover:text-amber-400 dark:text-neutral-600"
+                          }`}
+                        >
+                          {n.isStarred ? "★" : "☆"}
+                        </button>
+                      </form>
+                    )}
+                    {canEdit && !isEditing && (
+                      <a
+                        href={`?edit=${n.id}#note-${n.id}`}
+                        className="text-xs underline hover:text-neutral-900 dark:hover:text-neutral-200"
+                      >
+                        Edit
+                      </a>
+                    )}
+                    {!withinWindow && isAuthor && (
+                      <span className="text-xs italic">Edit window expired</span>
+                    )}
+                  </div>
                 </div>
                 {isEditing && canEdit ? (
                   <form
@@ -598,10 +629,58 @@ export default async function ContactDetailPage({
         </div>
         <div>
           <h3 className="mb-2 text-sm font-medium">Email threads ({data.threads.length})</h3>
-          <p className="text-xs text-neutral-500">Synced in PR 2.</p>
+
+          {/* Decisions panel — pinned threads (US-016 / S3) */}
+          {data.threads.some((t) => t.isPinned) && (
+            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-950">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                Decisions
+              </p>
+              <ul className="space-y-1 text-sm">
+                {data.threads
+                  .filter((t) => t.isPinned)
+                  .map((t) => (
+                    <li key={`pinned-${t.id}`} id={`thread-${t.id}`} className="flex items-center gap-2">
+                      {canWrite && (
+                        <form action={togglePinnedThread.bind(null, t.id, id)}>
+                          <button
+                            type="submit"
+                            title="Unpin thread"
+                            aria-label="Unpin thread"
+                            className="text-sm leading-none text-blue-500 hover:text-blue-700"
+                          >
+                            📌
+                          </button>
+                        </form>
+                      )}
+                      <span className="text-neutral-500">{t.lastMessageAt?.toISOString().slice(0, 10) ?? ""}</span>{" "}
+                      <span className="font-medium">{t.subject}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Full thread list */}
           <ul className="mt-2 space-y-1 text-sm">
             {data.threads.map((t) => (
-              <li key={t.id}>
+              <li key={t.id} id={!t.isPinned ? `thread-${t.id}` : undefined} className="flex items-center gap-2">
+                {canWrite && (
+                  <form action={togglePinnedThread.bind(null, t.id, id)}>
+                    <button
+                      type="submit"
+                      title={t.isPinned ? "Unpin thread" : "Pin thread to Decisions"}
+                      aria-label={t.isPinned ? "Unpin thread" : "Pin thread"}
+                      className={`text-xs leading-none transition-colors ${
+                        t.isPinned
+                          ? "text-blue-500 hover:text-blue-700"
+                          : "text-neutral-300 hover:text-blue-400 dark:text-neutral-600"
+                      }`}
+                    >
+                      {t.isPinned ? "📌" : "📍"}
+                    </button>
+                  </form>
+                )}
                 <span className="text-neutral-500">{t.lastMessageAt?.toISOString() ?? ""}</span>{" "}
                 {t.subject}
               </li>

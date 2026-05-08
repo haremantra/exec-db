@@ -810,3 +810,79 @@ export async function setWorkArea(contactId: string, formData: FormData): Promis
   revalidatePath(`/crm/contacts/${contactId}`);
   revalidatePath("/crm/contacts");
 }
+
+// ── S2: toggleNoteStar ────────────────────────────────────────────────────────
+
+/**
+ * Toggle the "remember this" star on a call note (US-011 / S2 PR3).
+ *
+ * Only exec_all tier may star/unstar notes.
+ * The note must belong to the given contactId (validated in the query).
+ * Starred notes sort to the top of the call-notes list within the same date
+ * range (star wins over recency tie).
+ *
+ * @param noteId     UUID of the call_note row.
+ * @param contactId  UUID of the owning contact (used for validation + cache revalidation).
+ */
+export async function toggleNoteStar(noteId: string, contactId: string): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: toggleNoteStar requires exec_all tier");
+  }
+
+  await query(ctx(session), async (tx) => {
+    // Fetch current starred state (also validates the note belongs to this contact).
+    const [note] = await tx
+      .select({ isStarred: schema.callNote.isStarred })
+      .from(schema.callNote)
+      .where(and(eq(schema.callNote.id, noteId), eq(schema.callNote.contactId, contactId)))
+      .limit(1);
+
+    if (!note) throw new Error(`Call note not found: ${noteId}`);
+
+    await tx
+      .update(schema.callNote)
+      .set({ isStarred: !note.isStarred, updatedAt: new Date() })
+      .where(eq(schema.callNote.id, noteId));
+  });
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+}
+
+// ── S3: togglePinnedThread ────────────────────────────────────────────────────
+
+/**
+ * Toggle the pinned state on a Gmail email thread (US-016 / S3 PR3).
+ *
+ * Only exec_all tier may pin/unpin threads.
+ * The thread must belong to the given contactId.
+ * Pinned threads are promoted to a "Decisions" panel above the regular
+ * thread list.  They also remain in the regular list.
+ *
+ * @param threadId   UUID of the email_thread row.
+ * @param contactId  UUID of the owning contact.
+ */
+export async function togglePinnedThread(threadId: string, contactId: string): Promise<void> {
+  const session = await getSession();
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: togglePinnedThread requires exec_all tier");
+  }
+
+  await query(ctx(session), async (tx) => {
+    // Fetch current pinned state (also validates the thread belongs to this contact).
+    const [thread] = await tx
+      .select({ isPinned: schema.emailThread.isPinned })
+      .from(schema.emailThread)
+      .where(and(eq(schema.emailThread.id, threadId), eq(schema.emailThread.contactId, contactId)))
+      .limit(1);
+
+    if (!thread) throw new Error(`Email thread not found: ${threadId}`);
+
+    await tx
+      .update(schema.emailThread)
+      .set({ isPinned: !thread.isPinned })
+      .where(eq(schema.emailThread.id, threadId));
+  });
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+}
