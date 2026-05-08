@@ -48,10 +48,10 @@ _Last updated: 2026-05-07_
 ## F. Projects and tasks
 - **W6.1** "project" definition: a sales call; a licensing negotiation.
 - **W6.2** where tasks live today: head, emails, notebooks — decentralized.
-- **W6.3** how slipped tasks resurface: ~50% slip past their date today. (Ideal resurfacing mechanism not yet specified.)
-- **W6.4** delegation confirmation: _unanswered_
-- **W6.5** blocked vs stuck vs waiting: _unanswered_
-- **W6.6** 5 fields on a "this week" screen: _unanswered_
+- **W6.3** how slipped tasks resurface: ~50% slip past their date today. Ideal resurfacing: missed deadline or reminder from a third party.
+- **W6.4** delegation confirmation: wait for feedback, then check in if I haven't heard by a specific date.
+- **W6.5** blocked vs stuck vs waiting: **Blocked** = dependency on money or human resource that's unavailable. **Stuck** = problem is outside my expertise or time bandwidth and I have not committed to research workaround.
+- **W6.6** 5 fields on a "this week" screen: (1) prospects qualified to follow up with; (2) all emails for progress and inbox-zero; (3) admin tasks (paying vendors and contractors); (4) thought-leadership literature I draft; (5) product development roadmap.
 
 ## G. Delegation, team, and assistants
 - **W7.1** who else sees / who must not: _unanswered_
