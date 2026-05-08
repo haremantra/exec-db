@@ -100,7 +100,7 @@ _PR1 is **shipped** — excluded from re-estimate. Re-estimate covers PR2 + PR3 
 - **S9.8** styling polish: minimal (default)
 
 ## 10. Delivery and budget
-- **S10.1** budget ceiling: $40k (default)
+- **S10.1** budget ceiling: ~~$40k (default)~~ → **override (Path C, post-Module-A)**: $130k ceiling to match the full must-list ($36.6k–$127.4k estimate range). Mid-target: $80k.
 - **S10.2** timeline priority: fastest usable demo (default)
 - **S10.3** must-have outcome: Gmail autodrafts (default)
 - **S10.4** easiest defer: vision-check CLI (default)
@@ -224,19 +224,20 @@ re-estimate needed.
 5. Weekly digest variant (2–4 h).
 
 ### Sanity-band check
-- H_high = 637 > 600 **and** budget ceiling S10.1 = $40k → **TRIPPED ⚠**
+- H_high = 637 < new ceiling-equivalent of ~860 hr ($130k @ $150/hr) ✅ (resolved by S10.1 override → $130k)
 - Token cost / human cost = ~2.6% (well under 50%) ✅
 - Clock-time range = 2.6× (under 3× cap) ✅
 
-### Decision required (per estimation.md sanity rule)
+### Decision (chosen: Path C — raise budget)
 
-The new must-priority list overshoots the $40k ceiling by **$87k at high-end** and ~$3k below at low-end. Three paths forward — pick one before scheduling PR2:
+The CEO's install/keep bar — "I do not miss obligations or opportunities" (W9.4) — requires the full must-list. The $40k default ceiling assumed an MVP that's narrower than the interview revealed. **S10.1 raised to $130k ceiling, $80k mid-target**, matching the full re-estimate range.
 
-**Path A — Defer to PR4.** Move all 5 "easiest deferrals" above out of PR2/PR3. Drops ~50–110 h. Revised PR2+PR3 cost: **$28k–$94k**. Still above ceiling at high-end but closer. Easiest to walk back if priorities shift.
-
-**Path B — Trim must-list to "north-star only."** Keep only stories that directly enforce the cross-cutting invariants (SY-016 redaction, SY-008/US-014 isolation, SY-017 audit log, AD-003/AD-004 send-guards, US-024 counterfactual). Defer everything else. Drops ~80 h. Revised: **$24k–$80k**. Sharpens the install/keep threshold.
-
-**Path C — Raise the budget.** Update S10.1 from $40k to ~$80k–$130k to match the interview's must-list. Realistic for a CEO who said "I do not miss obligations or opportunities" is the install bar — that bar requires the full set.
+Implications:
+- PR2 scope is now committed at 145–292 h ($21.75k–$58.4k) — the largest single PR.
+- PR3 scope is 88–176 h ($13.2k–$35.2k).
+- Total PR2+PR3+vision+cross-cutting: $36.6k–$127.4k.
+- Aim for the **mid-target $80k** by shipping iteratively and pruning at PR2/PR3 boundaries via short specs (S10.5).
+- If burn-rate exceeds plan after PR2 ships, re-run Module B and consider Path A or B at that checkpoint.
 
 ### Blocking unanswered questions
 - _none — all S-ids resolved via defaults or Module A overrides_
