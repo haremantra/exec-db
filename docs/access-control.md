@@ -37,6 +37,73 @@ Every CSV/PDF export inserts into `audit.export_log` with a watermark string (us
 
 Automate a report from `audit.access_log` joined to `core.employee_dim`: who has each tier, when they last used it, and what they accessed. CEO signs off. Anyone inactive for 60 days is downgraded.
 
+## Sensitive contacts
+
+Added in PR2-C (stories US-014, AD-001, SY-008, AD-008).
+
+### Six-tag taxonomy
+
+A contact may carry at most one sensitive flag, chosen from the following values (`varchar(32)`, enforced by a `CHECK` constraint on `crm.contact.sensitive_flag`):
+
+| Value | Meaning |
+|---|---|
+| `rolled_off_customer` | Customer who ended their engagement — their notes/emails should not bleed into active-customer context. |
+| `irrelevant_vendor` | Salesperson pitching a service the exec does not need. |
+| `acquisition_target` | Company under consideration for M&A — strictly confidential. |
+| `loi` | Letter of intent in flight — extreme confidentiality. |
+| `vc_outreach` | Venture-capital firm that reached out for investment discussions. |
+| `partnership` | Prospective or active partner whose deal terms are non-public. |
+
+`NULL` (the default) means the contact is not sensitive.
+
+### Visibility per role
+
+| Role / Tier | Sees sensitive contacts? |
+|---|---|
+| `exec_all` | Always — the full record including the flag value. |
+| `function_lead` | Never — rows are hidden by RLS. |
+| `manager` | Never — rows are hidden by RLS. |
+| `app_assistant` (Stream H, not yet active) | Never — falls into the non-exec_all branch automatically. |
+| `employee` | Never — employees have no CRM access regardless. |
+
+The visibility rule is enforced at the database layer by the helper function `crm.is_sensitive_for_role(contact_id uuid)` in `packages/db/src/rls/policies.sql`.  It returns `TRUE` (hide the row) when:
+
+```sql
+app.current_tier() <> 'exec_all'
+AND EXISTS (SELECT 1 FROM crm.contact WHERE id = p_contact_id AND sensitive_flag IS NOT NULL)
+```
+
+Policies on `crm.call_note`, `crm.calendar_event`, and `crm.email_thread` call this function so that notes, events, and threads belonging to a sensitive contact are also hidden from non-exec roles.
+
+### Setting / clearing the flag
+
+Only `exec_all` tier may call the `setSensitiveFlag(contactId, formData)` server action.  The action:
+
+1. Asserts `session.tier === 'exec_all'`.
+2. Validates the flag value against `SENSITIVE_FLAG_VALUES`.
+3. Updates `crm.contact.sensitive_flag`.
+4. Writes an `audit.access_log` row (intent: `setSensitiveFlag contactId=… flag=…`).
+5. Revalidates the contact page cache.
+
+The flag is reversible: pass `"none"` or `null` to clear it.
+
+### Cross-pollination invariant
+
+> **Invariant (SY-008 / AD-008):** When generating any draft or briefing for contact A, no data belonging to a different contact B is retrieved as LLM context.
+
+Enforcement is two-layered:
+
+1. **Single-contact scope** — `apps/web/lib/contact-context.ts` is the only sanctioned entry point for fetching LLM context.  Every query inside it is filtered by the requested `contactId`.  The function signature and leading comment document this contract for Stream B (autodraft) and Stream F (briefing).
+
+2. **Runtime invariant check** — after each query, every returned row is validated: `row.contactId === contactId`.  If any mismatch is detected, the function throws:
+   ```
+   [contact-context] Cross-pollination invariant violated in callNote:
+   expected contact_id="aaa…" but got "bbb…"
+   ```
+   This acts as a loud regression guard so a future refactor that accidentally widens a query is caught in CI before it reaches production.
+
+The invariant is proven by `apps/web/__tests__/cross-pollination.test.ts` (10 tests), which runs on every push via CI.
+
 ## OAuth token encryption (PR2 — Stream A)
 
 ### Storage model
@@ -95,3 +162,24 @@ blocks any future introduction of `users.messages.send`.
 ## SOC 2 alignment
 
 The above plus: change management on `packages/db` migrations (PR + review + audit), backup PITR with monthly restore drill, and a sub-processor list checked into `docs/`. Cheap to do from day one; expensive to retrofit.
+
+## LLM audit log retention (AD-005)
+
+`audit.llm_call` is **append-only** and retained for **365 days minimum**.
+
+- No `UPDATE` or `DELETE` RLS policies exist on `audit.llm_call`. The table is INSERT-only from the application layer.
+- A delete-prevention `RULE` (`llm_call_no_delete`) and an update-prevention `RULE` (`llm_call_no_update`) are installed in `packages/db/src/rls/policies.sql`. Any attempt to `DELETE` or `UPDATE` rows raises a division-by-zero exception, preventing the operation at the database level even for superusers who bypass RLS.
+- `app_exec` can SELECT all rows. `app_function_lead` and `app_assistant` can SELECT all rows (TODO stream C: tighten to exclude sensitive contacts once `crm.contact.sensitive_flag` lands).
+- INSERT is restricted to `app_exec`; `recordLlmCall()` always runs under a synthetic exec-tier session for this reason.
+- The secondary Google Sheet (SY-017) is a human-readable export tier. The Postgres table is the authoritative source of truth. Sheet failures are logged but never propagate to the caller.
+
+## `app_assistant` role (AD-002)
+
+A new `app_assistant` Postgres role was added in PR2-E to satisfy AD-002 (Chief-of-Staff / EA access). It has:
+
+- `USAGE` on schemas `core`, `hr`, `fin`, `legal`, `ops`, `audit`, `crm`, `pm`.
+- `SELECT` on `crm.*` and `pm.*` (read-only; sensitive contacts hidden per future stream C hardening).
+- `INSERT` on `audit.*` (same as other non-exec roles).
+- No `UPDATE` or `DELETE` on any table.
+
+The `app_runtime` login role inherits `app_assistant` so the app can `SET ROLE app_assistant` per request.

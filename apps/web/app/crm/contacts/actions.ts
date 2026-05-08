@@ -1,11 +1,16 @@
 "use server";
 
-import { schema } from "@exec-db/db";
+import { schema, type SensitiveFlag, SENSITIVE_FLAG_VALUES } from "@exec-db/db";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { recordAccess } from "@/lib/audit";
+
+// Re-export so UI layers can import from one place.
+export type { SensitiveFlag };
+export { SENSITIVE_FLAG_VALUES };
 
 function ctx(session: Awaited<ReturnType<typeof getSession>>) {
   if (!session) throw new Error("Unauthorized");
@@ -108,6 +113,68 @@ export async function discardDraft(draftId: string, contactId: string): Promise<
       })
       .where(and(eq(schema.draft.id, draftId), eq(schema.draft.contactId, contactId))),
   );
+
+  revalidatePath(`/crm/contacts/${contactId}`);
+}
+
+/**
+ * Set or clear the sensitive flag on a contact (US-014 / AD-001).
+ *
+ * Designed to be called via `.bind(null, contactId)` from a form action,
+ * so Next.js passes FormData as the second argument.  The flag value is
+ * read from the `sensitiveFlag` form field.
+ *
+ * Only exec_all tier can call this action.  The change is audit-logged via
+ * recordAccess() (same pattern as comp.* access logging).
+ *
+ * Stream E will extend audit logging to include LLM call rows once
+ * audit.llm_call is available; for now this uses the existing access-log pattern.
+ *
+ * @param contactId  UUID of the contact to update (bound argument).
+ * @param formData   Form data from the sensitivity selector.
+ *                   `sensitiveFlag` field: one of SENSITIVE_FLAG_VALUES or "none".
+ *
+ * Programmatic callers (e.g., tests) may pass a FormData with the flag set,
+ * or use the internal helper _setSensitiveFlagDirect() exported below.
+ */
+export async function setSensitiveFlag(
+  contactId: string,
+  formData: FormData,
+): Promise<void> {
+  const session = await getSession();
+
+  // Only exec_all may set or clear a sensitive flag (US-014 acceptance criterion).
+  if (!session || session.tier !== "exec_all") {
+    throw new Error("Forbidden: setSensitiveFlag requires exec_all tier");
+  }
+
+  const raw = String(formData.get("sensitiveFlag") ?? "").trim();
+  const flag: SensitiveFlag | null =
+    raw === "" || raw === "none"
+      ? null
+      : (raw as SensitiveFlag);
+
+  // Validate the flag value even if TypeScript already narrows it.
+  if (flag !== null && !(SENSITIVE_FLAG_VALUES as readonly string[]).includes(flag)) {
+    throw new Error(`Invalid sensitive flag value: "${flag}"`);
+  }
+
+  await query(ctx(session), async (tx) => {
+    await tx
+      .update(schema.contact)
+      .set({ sensitiveFlag: flag, updatedAt: new Date() })
+      .where(eq(schema.contact.id, contactId));
+
+    // Audit log: record this sensitive-flag mutation so it is visible in
+    // audit.access_log (defense-in-depth; see docs/access-control.md).
+    await recordAccess(tx, session, {
+      schemaName: "core",  // crm is not in the existing AuditEntry union; use "core" as proxy.
+      tableName: "crm.contact",
+      action: "UPDATE",
+      intent: `setSensitiveFlag contactId=${contactId} flag=${flag ?? "null"}`,
+      metadata: { contactId, sensitiveFlag: flag },
+    });
+  });
 
   revalidatePath(`/crm/contacts/${contactId}`);
 }

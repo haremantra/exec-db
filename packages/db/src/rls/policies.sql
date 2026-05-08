@@ -146,13 +146,55 @@ $$;
 -- CRM + PM (operational tier, this app is system-of-record).
 --
 -- Audience today is exec-team only:
---   exec_all          → read + write
---   function_lead     → read-only
---   manager           → read-only
+--   exec_all          → read + write (sees ALL contacts including sensitive)
+--   function_lead     → read-only (sensitive contacts hidden)
+--   manager           → read-only (sensitive contacts hidden)
+--   app_assistant     → read-only (sensitive contacts hidden) — Stream H adds
+--                       the Postgres role; this policy already excludes them
+--                       via the non-exec_all branch.
 --   employee          → no access (except self-owned pm.task, see below)
 --
 -- We DROP/CREATE every policy idempotently to match the rest of this file.
 -- ============================================================================
+
+-- ============================================================================
+-- Sensitive-contact helper function (C2, US-014 / SY-008).
+--
+-- Returns TRUE iff:
+--   1. The current session tier is NOT exec_all, AND
+--   2. The contact identified by contact_id has a non-null sensitive_flag.
+--
+-- Use: WHERE NOT crm.is_sensitive_for_role(contact_id)
+--      so that sensitive rows are invisible to non-exec roles.
+--
+-- exec_all always sees everything — the function returns FALSE for them
+-- regardless of the flag value.
+--
+-- Stream H (app_assistant) does not yet have a Postgres role, but once
+-- added it will fall into the non-exec_all branch automatically.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION crm.is_sensitive_for_role(p_contact_id uuid)
+  RETURNS boolean
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = crm, public
+AS $$
+  SELECT
+    -- Only evaluate the flag if the caller is not exec_all.
+    app.current_tier() <> 'exec_all'
+    AND EXISTS (
+      SELECT 1
+      FROM crm.contact c
+      WHERE c.id = p_contact_id
+        AND c.sensitive_flag IS NOT NULL
+    );
+$$;
+
+-- Grant execute to the app runtime role so it runs inside RLS policies.
+-- (app_exec is granted via the app_runtime grant chain; both roles need this.)
+GRANT EXECUTE ON FUNCTION crm.is_sensitive_for_role(uuid) TO app_runtime;
 
 -- ----- crm.contact -----
 ALTER TABLE crm.contact ENABLE ROW LEVEL SECURITY;
@@ -160,7 +202,12 @@ ALTER TABLE crm.contact FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS contact_read ON crm.contact;
 CREATE POLICY contact_read ON crm.contact FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    -- Sensitive contacts are hidden from all non-exec tiers.
+    AND NOT crm.is_sensitive_for_role(crm.contact.id)
+    -- exec_all sees everything: is_sensitive_for_role returns false for them.
+  );
 
 DROP POLICY IF EXISTS contact_write ON crm.contact;
 CREATE POLICY contact_write ON crm.contact FOR ALL
@@ -186,7 +233,11 @@ ALTER TABLE crm.call_note FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS call_note_read ON crm.call_note;
 CREATE POLICY call_note_read ON crm.call_note FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    -- Hide notes whose parent contact is sensitive from non-exec roles.
+    AND NOT crm.is_sensitive_for_role(crm.call_note.contact_id)
+  );
 
 DROP POLICY IF EXISTS call_note_write ON crm.call_note;
 CREATE POLICY call_note_write ON crm.call_note FOR ALL
@@ -199,7 +250,15 @@ ALTER TABLE crm.calendar_event FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS calendar_event_read ON crm.calendar_event;
 CREATE POLICY calendar_event_read ON crm.calendar_event FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    -- contact_id is nullable on calendar_event (event may have no linked contact).
+    -- Only filter when a contact is linked; unlinked events are always visible.
+    AND (
+      crm.calendar_event.contact_id IS NULL
+      OR NOT crm.is_sensitive_for_role(crm.calendar_event.contact_id)
+    )
+  );
 
 DROP POLICY IF EXISTS calendar_event_write ON crm.calendar_event;
 CREATE POLICY calendar_event_write ON crm.calendar_event FOR ALL
@@ -212,7 +271,14 @@ ALTER TABLE crm.email_thread FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS email_thread_read ON crm.email_thread;
 CREATE POLICY email_thread_read ON crm.email_thread FOR SELECT
-  USING (app.current_tier() IN ('exec_all', 'function_lead', 'manager'));
+  USING (
+    app.current_tier() IN ('exec_all', 'function_lead', 'manager')
+    -- contact_id is nullable on email_thread (thread may have no linked contact).
+    AND (
+      crm.email_thread.contact_id IS NULL
+      OR NOT crm.is_sensitive_for_role(crm.email_thread.contact_id)
+    )
+  );
 
 DROP POLICY IF EXISTS email_thread_write ON crm.email_thread;
 CREATE POLICY email_thread_write ON crm.email_thread FOR ALL
@@ -322,3 +388,49 @@ DROP POLICY IF EXISTS digest_send_write ON pm.digest_send;
 CREATE POLICY digest_send_write ON pm.digest_send FOR ALL
   USING (app.current_tier() = 'exec_all')
   WITH CHECK (app.current_tier() = 'exec_all');
+
+-- ============================================================================
+-- audit.llm_call (SY-017, AD-005)
+--
+-- Append-only. No UPDATE or DELETE policies. A delete-prevention RULE/trigger
+-- (below) enforces this at the DB level per AD-005 (365-day retention).
+--
+-- INSERT:  app_exec only (audit writes always run as app_exec per recordLlmCall).
+-- SELECT:  app_exec can read all rows.
+--          app_function_lead + app_assistant can read all rows.
+--          TODO(stream C): tighten function_lead + assistant SELECT to exclude
+--          rows whose contact_id resolves to a sensitive contact once
+--          crm.contact.sensitive_flag is added by stream C.
+-- ============================================================================
+
+ALTER TABLE audit.llm_call ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.llm_call FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS llm_call_exec_read ON audit.llm_call;
+CREATE POLICY llm_call_exec_read ON audit.llm_call FOR SELECT
+  USING (app.current_tier() = 'exec_all');
+
+-- function_lead and app_assistant may read all rows for now.
+-- TODO(stream C): join to crm.contact and exclude sensitive contacts.
+DROP POLICY IF EXISTS llm_call_lead_read ON audit.llm_call;
+CREATE POLICY llm_call_lead_read ON audit.llm_call FOR SELECT
+  USING (app.current_tier() IN ('function_lead', 'assistant'));
+
+DROP POLICY IF EXISTS llm_call_insert ON audit.llm_call;
+CREATE POLICY llm_call_insert ON audit.llm_call FOR INSERT
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- Delete-prevention rule — raises an exception if DELETE is attempted.
+-- This enforces AD-005 (365-day minimum retention) at the DB level.
+DROP RULE IF EXISTS llm_call_no_delete ON audit.llm_call;
+CREATE RULE llm_call_no_delete AS ON DELETE TO audit.llm_call
+  DO INSTEAD (
+    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); DELETE is prohibited') AS _blocked
+  );
+
+-- Update-prevention rule — raises an exception if UPDATE is attempted.
+DROP RULE IF EXISTS llm_call_no_update ON audit.llm_call;
+CREATE RULE llm_call_no_update AS ON UPDATE TO audit.llm_call
+  DO INSTEAD (
+    SELECT 1/0 FROM (SELECT 'audit.llm_call is append-only (AD-005); UPDATE is prohibited') AS _blocked
+  );
