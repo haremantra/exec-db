@@ -12,6 +12,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { employeeDim } from "./core.js";
 
 /**
  * pgcrypto-encrypted bytea column.
@@ -294,6 +295,50 @@ export const draft = crm.table(
     index("draft_status_idx").on(t.status),
   ],
 );
+
+/**
+ * crm.user_pref — per-user digest opt-in preferences (PR3-O / S5.2).
+ *
+ * One row per user. Controls:
+ *   digest_daily_optin  — receive the daily digest (7am LA time, 14:00 UTC PDT).
+ *   digest_weekly_optin — receive the weekly digest (Sundays, same schedule).
+ *   unsubscribe_token   — random token embedded in unsubscribe links (/api/digest/unsubscribe).
+ *
+ * Migration SQL (run after adding this table to Drizzle):
+ *   CREATE TABLE crm.user_pref (
+ *     user_id           uuid PRIMARY KEY REFERENCES core.employee_dim(id),
+ *     digest_daily_optin  boolean NOT NULL DEFAULT false,
+ *     digest_weekly_optin boolean NOT NULL DEFAULT false,
+ *     unsubscribe_token   varchar(64) NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
+ *     created_at          timestamptz NOT NULL DEFAULT now(),
+ *     updated_at          timestamptz NOT NULL DEFAULT now()
+ *   );
+ *
+ * RLS:
+ *   Each user reads/writes their own row only.
+ *   app_exec (exec_all tier) reads all rows (for the cron worker).
+ *   See packages/db/src/rls/policies.sql for the policy definitions.
+ */
+export const userPref = crm.table("user_pref", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => employeeDim.id),
+  digestDailyOptin: boolean("digest_daily_optin").notNull().default(false),
+  digestWeeklyOptin: boolean("digest_weekly_optin").notNull().default(false),
+  /**
+   * Random token (64 hex chars = 32 random bytes) used in unsubscribe links.
+   * The DB default uses gen_random_bytes() — set by the migration above.
+   * The Drizzle schema does not encode the default directly because it
+   * requires pgcrypto; see migration SQL above.
+   */
+  unsubscribeToken: varchar("unsubscribe_token", { length: 64 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+});
 
 /**
  * crm.assistant_grant — records which assistants an exec has authorized.
