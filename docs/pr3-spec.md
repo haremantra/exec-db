@@ -117,17 +117,17 @@ Grouped by work-stream. Each row maps to one or more story IDs from `docs/user-s
 
 PR3 ships when **all** are true:
 
-1. `/dashboard` shows exactly 5 swimlanes per W6.6.
-2. "Do this first" card explains its top pick AND lists ≥3 alternatives with deprioritization reasons.
-3. Disagreeing with the suggestion records the override in `audit.access_log`.
-4. Daily digest emails actually deliver (or stub-log if SMTP not configured); contains assigned + owned tasks ranked by impact.
-5. Tuesday morning at 7am local, the dashboard top swimlane is "Close-ready".
-6. Slipped tasks (overdue OR awaiting-response past date) appear in both dashboard and digest.
-7. Customer-complaint alert pattern fires on a fixture email.
-8. Weekly retrospective `/retrospective` lists completed tasks grouped by project.
-9. "Export my CRM" produces a zip with one JSON per table + one .md per call note.
-10. CI green; all PR2 invariants still pass; cross-pollination test still passes.
-11. `pnpm typecheck && pnpm test` green; test count ≥190.
+1. ✅ `/dashboard` shows exactly 5 swimlanes per W6.6. (Stream L, PR #27; invariant guard in dashboard.test.ts)
+2. ✅ "Do this first" card explains its top pick AND lists ≥3 alternatives with deprioritization reasons. (Stream M, PR #25; invariant #7 guard in ranker.test.ts)
+3. ✅ Disagreeing with the suggestion records the override in `audit.access_log`. (Stream M `disagreeWithRanker` server action)
+4. ✅ Daily digest emails actually deliver (or stub-log if SMTP not configured); contains assigned + owned tasks ranked by impact. (Stream O, PR #24 + Stream P, PR #29)
+5. ✅ Tuesday morning at 7am local, the dashboard top swimlane is "Close-ready". (Stream N, PR #28; `getCloseReadyCohort`)
+6. ✅ Slipped tasks (overdue OR awaiting-response past date) appear in both dashboard and digest. (Stream N, PR #28; `getSlippedTasks`, `buildSlippedSection`)
+7. ✅ Customer-complaint alert pattern fires on a fixture email. (Stream Q, PR #30; `detectPriorityShifters` + 9 tests)
+8. ✅ Weekly retrospective `/retrospective` lists completed tasks grouped by project. (Stream R re-integrated by Stream T)
+9. ✅ "Export my CRM" produces a zip with one JSON per table + one .md per call note. (Stream S, PR #26; `exportCrmData`)
+10. ✅ CI green; all PR2 invariants still pass; cross-pollination test still passes. (Verified by `pnpm test` sweep in Stream T)
+11. ✅ `pnpm typecheck && pnpm test` green; test count ≥190. (Stream T cleanup sweep; 10 new tests in retrospective-and-checkin.test.ts)
 
 ## Branch + agent plan (automode)
 

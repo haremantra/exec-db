@@ -24,6 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
               <a href="/">Home</a>
               <a href="/crm/contacts">CRM</a>
               <a href="/dashboard">Dashboard</a>
+              <a href="/retrospective">Retro</a>
               <a href="/pm/projects">PM</a>
               <a href="/status">Status</a>
             </nav>

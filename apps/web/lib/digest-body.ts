@@ -56,7 +56,18 @@ import { schema } from "@exec-db/db";
 import { query } from "@/lib/db";
 import { rankTasks, type RankerTask, type RankingResult } from "@/lib/ranker";
 import { getCadenceAlerts, type CadenceAlert } from "@/lib/cadence-alert";
+import { detectPriorityShifters } from "@/lib/priority-shifters";
 import type { Session } from "@/lib/rbac";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Escape special Markdown characters so user-supplied strings don't break
+ * digest formatting.  Only escapes the subset used in the digest renderer.
+ */
+function escapeMarkdown(s: string): string {
+  return s.replace(/[\\*_`[\]>]/g, (c) => `\\${c}`);
+}
 
 // Stream N imports — used by the two new digest sections below.
 import type { SlippedTask } from "@/lib/slipped-tasks";
@@ -92,6 +103,8 @@ export async function assembleDigestBody(
   session?: Session,
 ): Promise<DigestBodyResult> {
   const now = new Date();
+  // Digests run as the recipient's own session; the elevated tier is needed
+  // only for the cross-user task scan and is safe because RLS still applies.
   const effectiveSession: Session = session ?? {
     userId,
     email: "",
@@ -336,6 +349,67 @@ export async function assembleDigestBody(
       lines.push(
         `- **${capitalize(alert.category)}**: ${alert.actualCount}/${alert.expectedPerWindow} expected ${windowLabel} (${gap} short)`,
       );
+    }
+    lines.push("");
+  }
+
+  // ── Pending drafts (R3 / US-013) ─────────────────────────────────────────
+  // Drafts older than 24 hours that are still pending review.
+  const pendingDraftCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const pendingDrafts = await query(effectiveSession, async (tx) =>
+    tx
+      .select({
+        id: schema.draft.id,
+        contactId: schema.draft.contactId,
+        contactName: schema.contact.fullName,
+        subject: schema.draft.subject,
+        generatedAt: schema.draft.generatedAt,
+      })
+      .from(schema.draft)
+      .leftJoin(schema.contact, eq(schema.draft.contactId, schema.contact.id))
+      .where(
+        and(
+          eq(schema.draft.status, "pending"),
+          sql`${schema.draft.generatedAt} < ${pendingDraftCutoff.toISOString()}`,
+        ),
+      ),
+  );
+  if (pendingDrafts.length > 0) {
+    lines.push(`## Drafts pending review (>24h)`);
+    lines.push("");
+    for (const d of pendingDrafts) {
+      const contactLink = d.contactId
+        ? `[${d.contactName ?? "(unknown contact)"}](${appBaseUrl}/crm/contacts/${d.contactId})`
+        : (d.contactName ?? "(unknown contact)");
+      // toLocaleString (not toLocaleDateString) to include time component (Copilot PR #31).
+      lines.push(`- ${contactLink} — ${d.subject ?? "(no subject)"} (${d.generatedAt.toLocaleString("en-US", { timeZone: "America/Los_Angeles" })})`);
+    }
+    lines.push("");
+  }
+
+  // ── Priority shifters (Q1 / SY-014) ──────────────────────────────────────
+  const shifters =
+    cadence === "daily"
+      ? await detectPriorityShifters(effectiveSession, {
+          since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        })
+      : await detectPriorityShifters(effectiveSession);
+  if (shifters.length > 0) {
+    lines.push(`## Priority shifts (${shifters.length})`);
+    lines.push("");
+    lines.push("_These inbound signals may need attention above your normal task list._");
+    lines.push("");
+    for (const s of shifters) {
+      const subject = escapeMarkdown(s.subject ?? "(no subject)");
+      const kindLabel =
+        s.kind === "customer_complaint" ? "[Customer complaint]" : "[Competitor mention]";
+      const link = s.contactId
+        ? ` — [view contact](${appBaseUrl}/crm/contacts/${s.contactId})`
+        : "";
+      lines.push(`- ${kindLabel} **${subject}**${link}`);
+      if (s.snippet) {
+        lines.push(`  > ${escapeMarkdown(s.snippet.slice(0, 160).replace(/\n/g, " "))}`);
+      }
     }
     lines.push("");
   }
