@@ -2,9 +2,27 @@
 
 **Date**: 2026-05-09  
 **Auditor**: Claude Code (autonomous agent)  
-**Branch**: `claude/runbook-audit`  
-**Runbooks audited**: `docs/pr2-prereqs-runbook.md`, *(pr3-prereqs-runbook.md does not exist — see Finding #1)*  
-**Cross-check anchor**: `docs/deploy-checklist.md` *(does not exist — see Finding #2)*
+**Branch**: `claude/runbook-audit`
+
+> **Errata (added during merge resolution)**: the audit agent's worktree did
+> not see two files that already existed on `main`:
+> - `docs/pr3-prereqs-runbook.md` (243-line runbook from PR #33)
+> - `docs/deploy-checklist.md` (131-line checklist from PR #34)
+>
+> Findings #1, #2, and the "Most critical" framing in Section 1 below are
+> therefore **false positives** — both files exist and already cover the env
+> vars the agent claimed were undocumented. The agent's stub-replacements
+> were reverted in this PR's merge resolution; main's versions are kept.
+>
+> **Genuine findings still actionable**:
+> - Finding #3 — `GOOGLE_TOKEN_ENC_KEY` missing from `pr2-prereqs-runbook.md`
+> - Finding #5 — `pgcrypto` extension never enabled by runbook
+> - Finding #6 — `uuid-ossp` extension never enabled by runbook
+> - Finding #7 — `openid` and `email` OAuth scopes missing from consent-screen step
+> - NITs already merged into `pr2-prereqs-runbook.md`
+>
+> The findings table below is preserved verbatim so the agent's reasoning is
+> auditable. Cross-reference each row against this errata before acting.
 
 ---
 

@@ -1,176 +1,216 @@
 # PR3 admin prereqs — literal step-by-step runbook
 
-For a non-technical admin (CEO, EA, Chief of Staff). Covers everything
-needed to deploy the PR3 feature set: email digests (daily + weekly),
-priority-shifter detection, Vercel Cron jobs, and production URL updates.
+Sister doc to `docs/pr2-prereqs-runbook.md`. Adds every external account
+and env var that PR3 introduced (digests, intake, priority shifters,
+production deploy). Same audience: a non-technical admin, no terminal
+required except the final `.env` step.
 
-**Prerequisite**: you have completed `docs/pr2-prereqs-runbook.md` in full.
-
-Estimated total time: **45–60 minutes**.
+Estimated total time: **60–80 minutes** if PR2 prereqs are already done.
 
 You will end this runbook with:
-- A Resend account with a verified sending domain and an API key.
-- SPF, DKIM, and DMARC DNS records published for that domain.
-- Your Vercel project updated with all new environment variables.
-- OAuth redirect URIs updated for your production Vercel URL.
-- All PR3 env vars populated in Vercel (and optionally in local `.env`).
+- A Resend account with a verified sender domain and an API key.
+- An email-intake forwarder pointed at the production domain.
+- A configured competitor-domains list.
+- A symmetric encryption key for stored OAuth tokens.
+- All PR3 env vars populated in `.env` (local) and Vercel (staging/prod).
 
-Reference: `docs/pr3-spec.md` streams O, Q (digest infrastructure, priority shifters).
+Reference: PR3 added these env vars beyond PR2's:
+- `RESEND_API_KEY`, `RESEND_FROM_ADDRESS`
+- `EMAIL_INTAKE_SECRET`
+- `COMPETITOR_DOMAINS`
+- `GOOGLE_TOKEN_ENC_KEY`
+- `CRON_SECRET` (Vercel sets automatically — no admin action)
+
+`GOOGLE_SHEETS_AUDIT_ID` and `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` are
+covered by `docs/pr2-prereqs-runbook.md` Category 5–6 — make sure that
+runbook is complete before starting this one.
 
 ---
 
-## Before you start — collect these
+## Before you start
 
-- **Vercel project URL** — the `*.vercel.app` URL or custom domain where the app is deployed.
-- **Sending domain** — the domain you want digests to come from (e.g., `digests.example.com` or `exec-db.example.com`). This must be a domain you control (can add DNS records to).
+Open a notes app and have these ready:
+- **Production domain** (e.g. `app.example.com`) where the deployed app will live.
+- **CEO Workspace email** (same as PR2 runbook).
+- **List of competitor company domains** the exec wants tracked (e.g. `rival.io,acme-alt.com`).
 
 ---
 
-## Category 1 — Resend account + API key (15 min)
+## Category 1 — Resend account + verified domain (20 min)
 
 1. **Create a Resend account.**
-   Open <https://resend.com> → click **Sign up** → use the CEO email or a shared team email.
+   1. Open <https://resend.com/signup>.
+   2. Sign up with the CEO Workspace email.
+   3. Verify the email link Resend sends.
 
-2. **Add your sending domain.**
-   1. In the Resend dashboard, go to **Domains** → click **Add domain**.
-   2. Enter your sending domain (e.g., `digests.example.com`).
-   3. Resend will show you DNS records to add. Continue to step 3.
+2. **Add and verify your sender domain.**
+   1. In the Resend dashboard, click **Domains → Add Domain**.
+   2. Enter your sender domain (e.g. `mail.yourcompany.com`). Subdomains are recommended over the apex domain.
+   3. Resend shows DNS records (TXT for SPF, CNAME for DKIM, optional DMARC). **Copy each record into your DNS provider's admin** (Google Domains / Cloudflare / Route 53 / etc.).
+   4. Wait 5–15 min for DNS propagation. Resend's UI shows a green "Verified" badge when ready.
 
-3. **Publish the DNS records.**
-   Log in to your DNS provider (e.g., Cloudflare, Route 53, Google Domains) and add **all three record types** that Resend shows:
+3. **Create an API key.**
+   1. Resend dashboard → **API Keys → Create API Key**.
+   2. Name: `exec-db-prod`. Permissions: **Sending access** (read-only is not enough).
+   3. Copy the key (starts with `re_…`) into your notes as `RESEND_API_KEY`.
+   4. Also copy your verified sender address (e.g. `digests@mail.yourcompany.com`) as `RESEND_FROM_ADDRESS`.
 
-   | Record type | Purpose | Example name | Example value |
-   |---|---|---|---|
-   | `TXT` | SPF — authorizes Resend to send on your behalf | `digests.example.com` or `@` | `v=spf1 include:amazonses.com ~all` *(Resend provides the exact value)* |
-   | `CNAME` or `TXT` | DKIM — cryptographic email signature | `resend._domainkey.digests.example.com` | *(Resend provides the exact value)* |
-   | `TXT` | DMARC — policy for failed auth | `_dmarc.digests.example.com` | `v=DMARC1; p=none; rua=mailto:your@email.com` |
-
-   > **All three records are required.**  SPF + DKIM prevent spam-folder delivery. DMARC is required by major providers (Gmail, Outlook) for bulk senders as of 2024.
-
-4. **Wait for DNS propagation.**
-   DNS changes can take 5–60 minutes. Resend shows a green **Verified** badge once all records are confirmed.
-
-5. **Create a Resend API key.**
-   1. Resend dashboard → **API Keys** → click **Create API key**.
-   2. **Name**: `exec-db production`.
-   3. **Permission**: `Sending access` (not full access).
-   4. Click **Add**. **Copy the key immediately** — it is only shown once.
-   5. Paste it into your notes as `RESEND_API_KEY`.
+4. **Test sending** (optional but recommended).
+   In Resend dashboard → **Send test email** → put your CEO inbox as the recipient → confirm delivery.
 
 ---
 
-## Category 2 — Vercel environment variables (15 min)
+## Category 2 — Generate `EMAIL_INTAKE_SECRET` (5 min)
 
-6. **Open your Vercel project settings.**
-   Go to <https://vercel.com> → your project → **Settings** → **Environment Variables**.
+Used to authenticate forwarded emails posting to `/api/intake/email`.
 
-7. **Add the following variables.**
-   For each variable: click **Add New**, enter the **Name** and **Value**, set **Environment** to `Production` (and optionally `Preview`), then click **Save**.
-
-   | Variable name | Value | Notes |
-   |---|---|---|
-   | `RESEND_API_KEY` | The key from step 5 | Required. Digest delivery fails without this. |
-   | `RESEND_FROM_ADDRESS` | e.g., `exec-db <noreply@digests.example.com>` | Required. Must be a verified Resend sender address. Format: `Display Name <email@domain>`. If omitted, Resend will reject emails from the invalid default. |
-   | `NEXT_PUBLIC_APP_URL` | e.g., `https://exec-db.vercel.app` or your custom domain | Required. Used in unsubscribe links in digest emails. Must be the full URL with `https://`. |
-   | `EMAIL_INTAKE_SECRET` | A random secret string (see step 8 below) | Required. Authenticates the email-intake webhook endpoint. |
-   | `COMPETITOR_DOMAINS` | e.g., `rival.io,competitorco.com` | Optional. Comma-separated list of competitor domains for the priority-shifter detector. Leave blank to disable domain-based detection (phrase-based detection still runs). |
-   | `ANTHROPIC_API_KEY` | Your Anthropic API key from <https://console.anthropic.com> | Required for digest ranking (Claude Opus call in the ranker). Get your key from the Anthropic Console under **API Keys**. |
-   | `GOOGLE_TOKEN_ENC_KEY` | The same value you set locally in PR2 step 34 | Required. Must match the value used to encrypt tokens stored in the database. |
-   | `GOOGLE_CLIENT_ID` | From PR2 step 20 | Required. |
-   | `GOOGLE_CLIENT_SECRET` | From PR2 step 20 | Required. |
-   | `GOOGLE_OAUTH_REDIRECT_URI` | `https://<your-vercel-domain>/api/auth/google/callback` | Required. See step 9 for updating the GCP OAuth client. |
-   | `GOOGLE_SHEETS_AUDIT_ID` | From PR2 step 31 | Required if using Sheet audit logging. |
-   | `DATABASE_URL_APP` | Your production Postgres connection string for `app_runtime` role | Required. Format: `postgres://app_runtime:PASSWORD@host:5432/exec_db`. |
-   | `DATABASE_URL` | Your production Postgres connection string for the superuser (migration) role | Required for `db:push` / `db:rls` runs. Not needed at Vercel runtime if `DATABASE_URL_APP` is set. |
-   | `REDACTION_PUBLIC_DOMAINS` | e.g., `gmail.com,outlook.com,company.com` | Optional. Comma-separated email domains that are NOT masked in LLM prompts. Leave blank to mask all email addresses. |
-
-   > **`GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` does not work on Vercel.**
-   > Vercel functions run in ephemeral containers with no local filesystem.
-   > The Sheet audit log will silently skip appends on Vercel until this is resolved.
-   > **TODO (requires user decision)**: either (a) inline the service-account JSON as a
-   > `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_JSON` environment variable and update the code
-   > to read it, or (b) use a Vercel integration / secrets manager to mount the file.
-   > For now, the Postgres `audit.llm_call` table remains the source of truth and the
-   > Sheet append is a best-effort secondary tier.
-
-8. **Generate `EMAIL_INTAKE_SECRET`.**
-   Open Terminal (on your local machine) and run:
+5. **Generate a random secret.** From any Terminal:
    ```bash
    openssl rand -hex 32
    ```
-   Copy the 64-character hex output as the value for `EMAIL_INTAKE_SECRET`.
-   Store it in your password manager — you will need it whenever you configure an email forwarding service to POST to `/api/intake/email`.
+   Copy the 64-character hex string into your notes as `EMAIL_INTAKE_SECRET`.
+
+6. **(Optional, deferred) Wire an email forwarder.**
+   The current intake API expects POST JSON, not raw forwarded email. To deliver real emails into it you need an intermediary. Options, ranked by cost:
+   - **Pipedream** (free tier 10k events/mo): create a workflow with Email-Trigger source → HTTP-POST destination targeting `https://<your-domain>/api/intake/email` with header `X-Intake-Secret: <value>`.
+   - **Cloudflare Worker** with Email Routing: ~$0.50/mo at low volume.
+   - **Native Gmail filter forwarding** does NOT work — Gmail can only forward to other email addresses, not HTTP endpoints.
+   This step is optional: if you skip it now, the API endpoint exists and tests pass; the exec just won't get auto-created draft contacts from forwarded emails until the intermediary is wired.
 
 ---
 
-## Category 3 — Update GCP OAuth client for production (10 min)
+## Category 3 — Generate `GOOGLE_TOKEN_ENC_KEY` (3 min)
 
-9. **Update OAuth redirect URIs in GCP.**
-   The PR2 runbook set up `http://localhost:3000` only. For production, you must add the Vercel URL.
+Symmetric key used by `pgp_sym_encrypt` / `pgp_sym_decrypt` in `crm.oauth_token`.
 
-   1. Open <https://console.cloud.google.com> → your project → **APIs & Services → Credentials**.
-   2. Click the OAuth client `exec-db web (dev)` (or rename it to `exec-db web` now that it covers both).
-   3. Under **Authorized JavaScript origins**, click **+ ADD URI** → add your Vercel URL:
-      `https://<your-vercel-domain>`
-   4. Under **Authorized redirect URIs**, click **+ ADD URI** → add:
-      `https://<your-vercel-domain>/api/auth/google/callback`
-   5. Click **SAVE**.
+7. **Generate the key.** From Terminal:
+   ```bash
+   openssl rand -base64 32
+   ```
+   Copy the 44-char base64 string into your notes as `GOOGLE_TOKEN_ENC_KEY`.
 
-   > Existing `localhost:3000` entries can remain for local development.
-
-10. **Update the OAuth consent screen authorized domain (if using a custom domain).**
-    APIs & Services → OAuth consent screen → scroll to **App domain** → **Authorized domains**.
-    Add your Vercel custom domain (e.g., `exec-db.example.com`) if it differs from your Workspace domain.
+8. **Rotation policy.** Document this somewhere safe — losing this key means every connected Google account must re-authorize. To rotate: generate a new key, run a one-time SQL transaction to re-encrypt all rows, then deploy the new key. (See `docs/access-control.md` for details.)
 
 ---
 
-## Category 4 — Vercel Cron setup (5 min)
+## Category 4 — Decide `COMPETITOR_DOMAINS` (5 min)
 
-11. **Verify Vercel Cron is active.**
-    The `apps/web/vercel.json` file defines two crons:
-    - Daily digest: `0 14 * * *` (14:00 UTC = 7:00 am Los Angeles PDT)
-    - Weekly digest: `0 14 * * 0` (Sundays at same time)
+Used by Stream Q (priority shifters) to detect when an inbound email mentions a competitor.
 
-    Vercel Cron is available on **Pro and Enterprise plans** only.
-
-    To verify:
-    1. Vercel dashboard → your project → **Cron Jobs** tab.
-    2. You should see `GET /api/cron/digest-daily` and `GET /api/cron/digest-weekly` listed.
-    3. If the tab is missing or shows an upgrade prompt, upgrade your Vercel plan.
-
-12. **Verify `CRON_SECRET` is set automatically.**
-    Vercel automatically injects `CRON_SECRET` into your project environment when you have cron jobs configured on a Pro/Enterprise plan. You do NOT need to generate or set this manually.
-
-    To confirm:
-    1. Vercel dashboard → **Settings → Environment Variables**.
-    2. Look for `CRON_SECRET` in the list. If it is there (even if the value is hidden), Vercel has set it.
-    3. If it is missing, redeploy once from the Vercel dashboard — Vercel injects `CRON_SECRET` on deploy.
-
-    > The cron routes (`/api/cron/digest-daily`, `/api/cron/digest-weekly`) reject all requests
-    > that do not present `Authorization: Bearer <CRON_SECRET>`. This prevents anyone from
-    > triggering digests manually. Vercel sends this header automatically on scheduled calls.
+9. **List the domains the exec actively monitors.** Comma-separated, no spaces:
+   ```
+   COMPETITOR_DOMAINS=rival.io,acme-alt.com,competitor3.com
+   ```
+   Copy into your notes. Empty list is acceptable (phrase-based detection like "we're going with" still runs).
 
 ---
 
-## Category 5 — Verify and test (5 min)
+## Category 5 — Drop everything into `.env` (5 min)
 
-13. **Trigger a test cron call (optional).**
-    From the Vercel dashboard → **Cron Jobs** tab → click **Trigger** next to the daily digest cron.
-    Check the function logs (Vercel → **Logs**) for a `200 OK` response with `{ "cadence": "daily", ... }`.
-    If you see `401 Unauthorized`, `CRON_SECRET` is not set (redeploy).
-    If you see `RESEND_API_KEY not set`, add it to environment variables.
+Done by the dev on their laptop after the runbook above is complete.
 
-14. **Send a test digest manually (optional, developer step).**
-    A developer can trigger a single digest send by calling the cron endpoint with the `CRON_SECRET`:
+10. **Open `.env`.**
     ```bash
-    curl -H "Authorization: Bearer <CRON_SECRET>" \
-         https://<your-vercel-domain>/api/cron/digest-daily
+    open -e ~/code/exec-db/.env
     ```
-    Replace `<CRON_SECRET>` with the value from the Vercel environment variables page.
 
-15. **Verify Resend delivery.**
-    After triggering, log in to the Resend dashboard → **Emails** → confirm the email appears with status `Delivered`.
-    If status is `Bounced` or `Failed`, check the `RESEND_FROM_ADDRESS` is a verified sender.
+11. **Append the new lines** at the bottom:
+
+    ```bash
+    # PR3 prereqs
+    RESEND_API_KEY=
+    RESEND_FROM_ADDRESS=
+    EMAIL_INTAKE_SECRET=
+    COMPETITOR_DOMAINS=
+    GOOGLE_TOKEN_ENC_KEY=
+    NEXT_PUBLIC_APP_URL=http://localhost:3000
+    # CRON_SECRET is set by Vercel automatically in production; for local dev, set any string.
+    CRON_SECRET=local-dev-cron-secret
+    ```
+
+12. **Paste the values** from your notes (steps 3, 5, 7, 9).
+
+13. **Save and close** (`⌘+S`, close TextEdit).
+
+14. **Confirm `.env` is gitignored** (same as PR2 runbook step 36):
+    ```bash
+    cd ~/code/exec-db && git check-ignore -v .env
+    ```
+    Expect to see a line ending in `.env`. If it prints nothing, **stop** and tell the dev.
+
+---
+
+## Category 6 — Vercel production env vars (10 min)
+
+15. **Open the Vercel project.**
+    Sign in to <https://vercel.com>; pick the `exec-db` project. (Create the project first if it doesn't exist — link the GitHub repo.)
+
+16. **Add env vars one at a time.**
+    Project → **Settings → Environment Variables**. Add for **Production** + **Preview**:
+
+    | Name | Source | Where used |
+    |---|---|---|
+    | `DATABASE_URL` | your Postgres connection string (Neon/RDS) | DB writes |
+    | `DATABASE_URL_APP` | least-privileged role | DB reads |
+    | `ANTHROPIC_API_KEY` | from PR1 | LLM calls |
+    | `GOOGLE_CLIENT_ID` | from `pr2-prereqs-runbook.md` step 20 | OAuth |
+    | `GOOGLE_CLIENT_SECRET` | from `pr2-prereqs-runbook.md` step 20 | OAuth |
+    | `GOOGLE_OAUTH_REDIRECT_URI` | `https://<your-domain>/api/auth/google/callback` | OAuth |
+    | `GOOGLE_TOKEN_ENC_KEY` | step 7 above | OAuth-token pgcrypto |
+    | `GOOGLE_SHEETS_AUDIT_ID` | from `pr2-prereqs-runbook.md` step 31 | Audit log |
+    | `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` | path on Vercel — see step 17 | Audit Sheet |
+    | `RESEND_API_KEY` | step 3 above | Digest emails |
+    | `RESEND_FROM_ADDRESS` | step 3 above | Digest emails |
+    | `EMAIL_INTAKE_SECRET` | step 5 above | Email intake auth |
+    | `COMPETITOR_DOMAINS` | step 9 above | Priority shifters |
+    | `NEXT_PUBLIC_APP_URL` | `https://<your-domain>` | Unsubscribe links |
+    | `CRON_SECRET` | Vercel sets automatically — leave blank, Vercel injects it |
+
+17. **Service-account JSON on Vercel.**
+    Vercel doesn't have a filesystem like a Mac. Two options:
+    1. **Encode the JSON inline** — set `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64` to the base64-encoded file content (`base64 -w0 ~/exec-db-secrets/audit-writer.json`), and have the dev decode it at runtime. (This requires a small code change in `apps/web/lib/audit-sheet.ts` — flag for the dev.)
+    2. **Use Vercel's Secrets storage** — Project → Settings → Secrets → upload as a file. Then point `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` at the mounted secret path. (Vercel's Pro plan supports this; Hobby plan does not.)
+    Recommend option 1 if you're on Hobby; option 2 on Pro.
+
+18. **Vercel Cron is enabled automatically.**
+    The `apps/web/vercel.json` file in the repo declares the daily/weekly schedules. After the first deploy, Vercel reads it and shows the schedules in **Settings → Cron Jobs**. `CRON_SECRET` is auto-injected.
+
+---
+
+## Category 7 — Verify (10 min)
+
+19. **Local typecheck + tests.**
+    ```bash
+    cd ~/code/exec-db
+    pnpm install
+    pnpm typecheck
+    pnpm test
+    ```
+    Expect green. **271/271 tests** at PR3 close.
+
+20. **Local dev server.**
+    ```bash
+    pnpm dev
+    ```
+    Open <http://localhost:3000/dashboard>. The dashboard renders even without real Google data — sample empty-lane prompts show. The "Do this first" card calls Anthropic and may show a real ranking if you've added test tasks via `pnpm db:seed`.
+
+21. **Resend test from the running app** (optional).
+    With the dev server running, hit the unsubscribe endpoint just to confirm routing:
+    ```bash
+    curl -i "http://localhost:3000/api/digest/unsubscribe?token=test"
+    ```
+    Expect HTTP 200 (the token won't match anything but the endpoint should not 500).
+
+22. **Production deploy.**
+    Push to `main` (already auto-merged via PR3). Vercel builds. Watch the build log for any "missing env var" errors and patch.
+
+23. **First scheduled cron** runs at 7am LA-time the next day. Watch the **Cron Jobs** tab for the run + status.
+
+---
+
+## Category 8 — Optional: opt the CEO into digests (2 min)
+
+24. Once production is live, the CEO signs in and visits `/settings/digest`, ticks "Daily" and/or "Weekly", saves. Their next cron tick will deliver the digest.
 
 ---
 
@@ -178,25 +218,26 @@ Reference: `docs/pr3-spec.md` streams O, Q (digest infrastructure, priority shif
 
 | Symptom | Fix |
 |---|---|
-| Digest cron returns `401 Unauthorized` | `CRON_SECRET` not set in Vercel. Redeploy from Vercel dashboard — it is auto-injected on deploy. |
-| `sendEmailViaResend: RESEND_API_KEY env var is required` | Add `RESEND_API_KEY` to Vercel environment variables (step 7). |
-| Digest emails go to spam | DNS records incomplete. Verify SPF, DKIM, and DMARC are all published (step 3) and Resend shows the domain as **Verified** (step 4). |
-| Unsubscribe links in digest emails return 404 | `NEXT_PUBLIC_APP_URL` is not set or has a typo. Confirm it matches the actual deployed URL (step 7). |
-| `Google OAuth not configured` error in production | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, or `GOOGLE_OAUTH_REDIRECT_URI` missing from Vercel env vars. |
-| OAuth callback fails with `redirect_uri_mismatch` | The production redirect URI was not added to the GCP OAuth client (step 9). |
-| `GOOGLE_TOKEN_ENC_KEY env var is not set` | Add `GOOGLE_TOKEN_ENC_KEY` to Vercel env vars (step 7). Must match the value used when tokens were first encrypted locally. |
-| Sheet append silently skipped on Vercel | `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` is a local file path and cannot work on Vercel. See the TODO note in step 7. |
-| Cron Jobs tab missing in Vercel | Vercel plan does not include Cron. Upgrade to Pro or Enterprise. |
-| Priority-shifter domain detection not working | `COMPETITOR_DOMAINS` is not set or is empty. Phrase-based detection still runs regardless. |
+| Resend says "Domain not verified" after 30 min | DNS provider may not have propagated — `dig TXT mail.yourdomain.com` should show the SPF record. Re-paste the TXT record. |
+| Vercel build fails on "Missing env var: RESEND_API_KEY" | Check Production scope is enabled on the env var. Re-deploy. |
+| `pgp_sym_encrypt` errors at runtime | `GOOGLE_TOKEN_ENC_KEY` not set OR `pgcrypto` extension not enabled. Run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` in your Postgres. |
+| Cron runs but nothing happens | Check Vercel Cron logs. Common cause: `CRON_SECRET` mismatch. The cron route validates `Authorization: Bearer ${CRON_SECRET}` — Vercel sets this automatically; do not override. |
+| Digest email lands in spam | DMARC + DKIM not yet propagated. Wait 24h after Category 1 step 2 and re-test. |
+| Email intake POST returns 401 | `EMAIL_INTAKE_SECRET` mismatch between `.env` and the forwarder's HTTP header. |
+| Service-account JSON path doesn't resolve on Vercel | Use option 1 (base64-inline) from step 17 — Vercel doesn't have arbitrary disk paths. |
+| `COMPETITOR_DOMAINS` change doesn't take effect | The variable is read at request time but cached by Vercel. Redeploy to invalidate. |
 
 ---
 
 ## What you handed off
 
-- A Resend account with SPF + DKIM + DMARC DNS records verified for your sending domain.
-- A Resend API key in Vercel environment variables.
-- All PR3 env vars set in Vercel: `RESEND_API_KEY`, `RESEND_FROM_ADDRESS`, `NEXT_PUBLIC_APP_URL`, `EMAIL_INTAKE_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_TOKEN_ENC_KEY`, and optionally `COMPETITOR_DOMAINS`, `REDACTION_PUBLIC_DOMAINS`.
-- OAuth redirect URIs updated in GCP for the production Vercel URL.
-- Vercel Cron confirmed active (daily + weekly digest schedules).
+After this runbook + `pr2-prereqs-runbook.md`, the production environment has:
+- GCP project + OAuth (PR2)
+- Audit-log Google Sheet (PR2)
+- Resend domain + API key (PR3)
+- Email-intake secret (PR3)
+- OAuth-token encryption key (PR3)
+- Competitor list (PR3)
+- Vercel Cron schedules (PR3)
 
-This covers the admin prerequisite side of PR3 streams O (digest), Q (priority shifters), and the Vercel deployment surface. The developer can now verify end-to-end digest delivery from the deployed app.
+The exec can sign in, connect Google, view the Monday dashboard with real data, generate autodrafts, get morning digests, and use the retrospective.
