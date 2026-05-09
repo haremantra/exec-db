@@ -7,7 +7,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { lineage } from "./core.js";
+import { lineage } from "./core";
 
 /**
  * Compensation lives in its own Postgres schema with its own role.

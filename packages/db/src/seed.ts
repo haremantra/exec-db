@@ -1,7 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import * as schema from "./schema/index.js";
+import * as schema from "./schema/index";
 
 const DEV_USER_ID = "00000000-0000-0000-0000-000000000001";
 

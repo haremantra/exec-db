@@ -51,7 +51,7 @@ const TITLE_RE =
  * Extract a likely job title from a signature block.
  * Scans each line for known title keywords.
  */
-export function extractTitle(body: string): string | null {
+function extractTitle(body: string): string | null {
   for (const line of body.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (TITLE_RE.test(trimmed) && trimmed.length < 120) {
@@ -68,7 +68,7 @@ export function extractTitle(body: string): string | null {
  *      (no @, not a URL, not a phone number, not empty, reasonable length).
  *   2. Fall back to the domain from the email address.
  */
-export function extractCompany(body: string, emailDomain: string): string | null {
+function extractCompany(body: string, emailDomain: string): string | null {
   const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;

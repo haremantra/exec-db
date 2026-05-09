@@ -1,6 +1,6 @@
 import { schema, type Db } from "@exec-db/db";
 import { createHash } from "node:crypto";
-import type { Session } from "./rbac.js";
+import type { Session } from "./rbac";
 
 export type AuditEntry = {
   schemaName: "core" | "hr" | "comp" | "fin" | "legal" | "ops" | "crm" | "pm";

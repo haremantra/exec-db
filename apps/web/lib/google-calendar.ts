@@ -9,7 +9,7 @@
 import { google } from "googleapis";
 import { sql } from "drizzle-orm";
 import { getDb } from "@exec-db/db";
-import { googleClientForUser } from "./google.js";
+import { googleClientForUser } from "./google";
 
 interface SyncCalendarOptions {
   since?: Date;

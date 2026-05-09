@@ -8,7 +8,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { lineage } from "./core.js";
+import { lineage } from "./core";
 
 export const legal = pgSchema("legal");
 

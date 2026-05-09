@@ -1,5 +1,5 @@
 import { cookies, headers } from "next/headers";
-import type { ExecTier, FunctionArea, Session } from "./rbac.js";
+import type { ExecTier, FunctionArea, Session } from "./rbac";
 
 /**
  * Phase 0 stub auth. Reads tier + identity from headers/cookies for local dev.

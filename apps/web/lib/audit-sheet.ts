@@ -10,7 +10,7 @@
 //
 // Implementation note: this module imports `googleapis` dynamically so that
 // the app starts without error even if the package is not yet installed
-// (e.g., in test environments). The dependency must be added to package.json
+// (e.g., in test environments). The dependency must be added to packageon
 // and `pnpm install` run before production use.
 //
 // To activate:

@@ -1,4 +1,5 @@
 "use server";
+import { ConfidentialContentError } from "./errors";
 
 import { createHash } from "node:crypto";
 import {
@@ -38,7 +39,7 @@ const LINKEDIN_URL_RE = /^https:\/\/(www\.)?linkedin\.com\/in\/([^/?#]+)\/?$/;
  * "alice-doe"  → "Alice Doe"
  * "AliceDoe"   → "AliceDoe"  (no hyphens: leave as-is)
  */
-export function slugToName(slug: string): string {
+export async function slugToName(slug: string): string {
   return slug
     .split("-")
     .map((part) => (part.length > 0 ? part[0]!.toUpperCase() + part.slice(1) : ""))
@@ -83,7 +84,7 @@ export async function quickAddFromLinkedIn(formData: FormData): Promise<void> {
   }
 
   const slug = match[2]!;
-  const fullName = slugToName(slug);
+  const fullName = await slugToName(slug);
   // Placeholder email: slug@linkedin-draft.invalid
   // exec must update this on the detail page before confirming.
   const primaryEmail = `${slug}@linkedin-draft.invalid`;
@@ -335,17 +336,6 @@ export interface AutodraftOutput {
  * Error thrown by `saveDraftToGmail` when the confidential-content guard
  * fires.  Carries the list of reasons so the UI can surface them.
  */
-export class ConfidentialContentError extends Error {
-  readonly reasons: string[];
-  constructor(reasons: string[]) {
-    super(
-      "Draft body contains confidential markers: " + reasons.join("; ") +
-        ". The exec must confirm before saving to Gmail.",
-    );
-    this.name = "ConfidentialContentError";
-    this.reasons = reasons;
-  }
-}
 
 // ── Tone → prompt instruction ─────────────────────────────────────────────────
 

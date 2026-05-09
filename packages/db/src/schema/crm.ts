@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { employeeDim } from "./core.js";
+import { employeeDim } from "./core";
 
 /**
  * pgcrypto-encrypted bytea column.
@@ -25,7 +25,7 @@ const encryptedBytea = customType<{ data: Buffer; driverData: Buffer }>({
     return "bytea";
   },
 });
-import { lineage } from "./core.js";
+import { lineage } from "./core";
 
 export const crm = pgSchema("crm");
 
