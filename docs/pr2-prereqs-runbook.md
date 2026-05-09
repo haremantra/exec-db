@@ -77,8 +77,18 @@ later.
    2. Search: `Google Sheets API`.
    3. **ENABLE**.
 
-9. **Verify all three are on.**
-   Left nav → **APIs & Services → Enabled APIs & services**. You should see *Google Calendar API*, *Gmail API*, and *Google Sheets API* listed.
+8a. **Enable the Google People API (userinfo).**
+    The OAuth callback fetches the user's email via the OAuth2 userinfo endpoint.
+    1. Back to Library.
+    2. Search: `Google People API`.
+    3. **ENABLE**.
+    *(Alternatively: search `OAuth2 API` — the userinfo endpoint is part of the Google OAuth2 API.
+    If you see both "Google People API" and "Google OAuth2 API" in the library, enable both.
+    The app will work without this step if your account is already in your Workspace directory, but enabling
+    it prevents permission errors in strict Workspace environments.)*
+
+9. **Verify all four are on.**
+   Left nav → **APIs & Services → Enabled APIs & services**. You should see *Google Calendar API*, *Gmail API*, *Google Sheets API*, and *Google People API* (or *Google OAuth2 API*) listed.
 
 ---
 
@@ -107,12 +117,20 @@ later.
     Click **SAVE AND CONTINUE**.
 
 15. **Scopes.**
-    Click **ADD OR REMOVE SCOPES**. Tick exactly these three:
+    Click **ADD OR REMOVE SCOPES**. Tick exactly these five:
     - `https://www.googleapis.com/auth/calendar.readonly` — *See and download your calendars*
     - `https://www.googleapis.com/auth/gmail.readonly` — *Read all resources and their metadata*
     - `https://www.googleapis.com/auth/gmail.compose` — *Manage drafts and send emails* (we use it for **drafts only** — see PR2 spec invariant #1)
+    - `openid` — *Required for the OpenID Connect flow; lets the callback verify the user's identity*
+    - `email` — *Required to read the user's Google account email via the userinfo endpoint*
 
-    **Do NOT add** `gmail.send`, `gmail.modify`, or any `userinfo` scopes. The spec forbids `gmail.send` everywhere.
+    **Do NOT add** `gmail.send`, `gmail.modify`, or any write-send scopes. The spec forbids `gmail.send` everywhere.
+
+    > **Why `openid` and `email`?** The OAuth callback (`/api/auth/google/callback`) calls
+    > `google.oauth2().userinfo.get()` to retrieve the authenticated user's email address so
+    > the app can link the Google account to the correct internal user record.  Both `openid`
+    > and `email` are required for that call to succeed.
+
     Click **UPDATE** → **SAVE AND CONTINUE**.
 
 16. **Test users.** Internal-only apps don't need test users. Click **SAVE AND CONTINUE**.
@@ -189,13 +207,17 @@ later.
     3. **Rename** the file (top-left) to `exec-db prompt audit log YYYY-MM` (current year-month). The sheet rotates monthly later; this is the first one.
 
 28. **Add the header row.**
-    Type the 9 column names directly into cells **A1 through I1**, one name per cell, in this order:
+    Type the 11 column names directly into cells **A1 through K1**, one name per cell, in this order:
 
-    | A1 | B1 | C1 | D1 | E1 | F1 | G1 | H1 | I1 |
-    |---|---|---|---|---|---|---|---|---|
-    | `timestamp_utc` | `contact_id` | `model` | `prompt_class` | `redacted_input_hash` | `response_hash` | `input_tokens` | `output_tokens` | `cost_usd` |
+    | A1 | B1 | C1 | D1 | E1 | F1 | G1 | H1 | I1 | J1 | K1 |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | `timestamp_utc` | `contact_id` | `model` | `prompt_class` | `redacted_input_hash` | `response_hash` | `redactions_applied` | `input_tokens` | `output_tokens` | `cost_usd` | `outcome` |
 
-    (If you prefer to paste rather than type: select cell A1, then paste the line `timestamp_utc<TAB>contact_id<TAB>…<TAB>cost_usd` where `<TAB>` is a real tab character. Most browsers preserve tabs from a code editor; pasting from this rendered doc may not, so typing is safer.)
+    > **Note**: The code writes 11 columns (added `redactions_applied` and `outcome` since the initial spec).
+    > If you see a different column count in code, the code is authoritative — the header is also written
+    > automatically on the first append if cell A1 is empty.
+
+    (If you prefer to paste rather than type: select cell A1, then paste the line with real tab characters between column names. Most browsers preserve tabs from a code editor; pasting from a rendered doc may not, so typing is safer.)
 
 29. **Freeze the header.** View → Freeze → 1 row.
 
@@ -228,21 +250,58 @@ This is the only step that touches the dev machine. Have whoever runs the dev se
     GOOGLE_CLIENT_SECRET=
     GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
 
+    # Token encryption key — REQUIRED. Used by pgp_sym_encrypt/pgp_sym_decrypt
+    # to store OAuth access/refresh tokens in the database.
+    # Generate a strong random value (at least 32 characters):
+    #   openssl rand -hex 32
+    # NEVER commit this value to git. Rotate it by running db:rls again after changing.
+    GOOGLE_TOKEN_ENC_KEY=
+
     # Audit-log Sheet (P4)
     GOOGLE_SHEETS_AUDIT_ID=
     # Use the absolute path from step 26.5 (no leading ~ — it does not expand from .env)
+    # IMPORTANT: This path is for local development only.
+    # For Vercel deployment, see docs/pr3-prereqs-runbook.md — the file-path approach
+    # does not work on Vercel's read-only containers. A different strategy is required.
     GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH=
     ```
 
-34. **Paste the values** from your notes:
+34. **Generate and set `GOOGLE_TOKEN_ENC_KEY`.**
+    Open Terminal and run:
+    ```bash
+    openssl rand -hex 32
+    ```
+    Copy the 64-character hex string into `GOOGLE_TOKEN_ENC_KEY=` in your `.env`.
+    This key encrypts all OAuth tokens stored in the database.
+    **If you lose or change this key, all stored tokens become unreadable and users will need to re-authorize.**
+
+34a. **Run `db:push` and `db:rls` to initialize the database.**
+    This is required before running the app for the first time.  Have the developer run from the project root:
+    ```bash
+    # 1. As a Postgres superuser, enable required extensions first:
+    #    (Connect to your database with psql or a GUI client and run:)
+    #    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+    #    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    #
+    # 2. Apply schema (creates all tables and schemas):
+    pnpm db:push
+    #
+    # 3. Apply roles and RLS policies (creates app_runtime, app_exec, etc.):
+    pnpm db:rls
+    ```
+    `db:push` uses `DATABASE_URL` (superuser). `db:rls` also uses `DATABASE_URL`.
+    Both steps are required; `db:rls` must run after `db:push`.
+
+35. **Paste the values** from your notes:
     - `GOOGLE_CLIENT_ID=` ← from step 20
     - `GOOGLE_CLIENT_SECRET=` ← from step 20
+    - `GOOGLE_TOKEN_ENC_KEY=` ← from step 34 (openssl output)
     - `GOOGLE_SHEETS_AUDIT_ID=` ← from step 31
     - `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH=` ← from step 26 (absolute path)
 
-35. **Save and close.** `⌘+S` then close TextEdit.
+36. **Save and close.** `⌘+S` then close TextEdit.
 
-36. **Confirm `.env` is actually ignored.** From Terminal:
+37. **Confirm `.env` is actually ignored.** From Terminal:
     ```bash
     cd ~/code/exec-db
     git check-ignore -v .env
@@ -253,16 +312,16 @@ This is the only step that touches the dev machine. Have whoever runs the dev se
 
 ## Category 8 — Verify (5 min)
 
-37. **Check the Sheet permissions.**
+38. **Check the Sheet permissions.**
     Open the audit-log Sheet → Share → confirm `exec-db-audit-writer@…` has **Editor** access.
 
-38. **Check OAuth consent screen status.**
+39. **Check OAuth consent screen status.**
     GCP console → APIs & Services → OAuth consent screen → confirm status is **In production** (Internal apps don't need verification).
 
-39. **Check enabled APIs.**
-    APIs & Services → Enabled APIs & services → confirm all three: Calendar, Gmail, Sheets.
+40. **Check enabled APIs.**
+    APIs & Services → Enabled APIs & services → confirm all four: Calendar, Gmail, Sheets, People API.
 
-40. **Send the dev a "go" signal.**
+41. **Send the dev a "go" signal.**
     Tell them P1–P4 are complete and `.env` is populated. They can start `claude/pr2-foundation`.
 
 ---
@@ -277,18 +336,24 @@ This is the only step that touches the dev machine. Have whoever runs the dev se
 | `gmail.send` accidentally added in step 15 | Edit → remove the scope → save. CI will block any code using send anyway (AD-004). |
 | Service-account JSON file lost | Re-download: Credentials → service account → KEYS → ADD KEY → JSON. Old key still works until revoked. |
 | Sheet writes fail with `403 PERMISSION_DENIED` | Service account email isn't on the Sheet share list (step 30). Re-add as Editor. |
-| `.env` accidentally committed | Stop. From Terminal: `git rm --cached .env && git commit -m "remove leaked .env"`. Then **rotate** all four secrets immediately. |
+| `.env` accidentally committed | Stop. From Terminal: `git rm --cached .env && git commit -m "remove leaked .env"`. Then **rotate** all secrets immediately. |
+| `ERROR: function uuid_generate_v4() does not exist` | The `uuid-ossp` Postgres extension is not enabled. Run `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";` as a superuser (step 34a). |
+| `ERROR: function pgp_sym_encrypt(text, text) does not exist` | The `pgcrypto` Postgres extension is not enabled. Run `CREATE EXTENSION IF NOT EXISTS pgcrypto;` as a superuser (step 34a). |
+| `GOOGLE_TOKEN_ENC_KEY env var is not set` | Add `GOOGLE_TOKEN_ENC_KEY=<your-generated-key>` to `.env` (step 34). |
+| OAuth callback fails with "No of-record Google token found" | The OAuth flow completed but the token wasn't stored. Confirm `GOOGLE_TOKEN_ENC_KEY` is set and both `pgcrypto` and `uuid-ossp` extensions are enabled. |
 
 ---
 
 ## What you handed off
 
 - A GCP project under your Workspace org with billing linked.
-- Calendar / Gmail / Sheets APIs enabled.
-- An Internal OAuth consent screen with exactly three scopes (Calendar.readonly, Gmail.readonly, Gmail.compose) and your domain authorized.
+- Calendar / Gmail / Sheets / People APIs enabled.
+- An Internal OAuth consent screen with five scopes (Calendar.readonly, Gmail.readonly, Gmail.compose, openid, email) and your domain authorized.
 - A web-app OAuth client with `localhost:3000` redirects (staging/prod added in PR3).
 - A service account that can only write to one Sheet — minimum privilege.
-- A monthly audit-log Sheet with a frozen 9-column header row.
+- A monthly audit-log Sheet with a frozen 11-column header row.
+- `pgcrypto` and `uuid-ossp` Postgres extensions enabled.
+- Database schema applied (`db:push`) and RLS roles + policies applied (`db:rls`).
 - A `.env` file populated locally (not in git) so the dev can start PR2.
 
 This is everything `docs/pr2-spec.md` prereqs P1–P4 require. The dev's first commit on `claude/pr2-foundation` (work-stream **D — redaction filter**) does not depend on any of this; commit **A — Google integration** does, and that's where these values get used.
