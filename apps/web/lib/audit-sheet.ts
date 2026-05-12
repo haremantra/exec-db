@@ -1,22 +1,29 @@
 // Google Sheets appender for the LLM audit log (SY-017, E2).
 //
 // Required env vars (set by admin per PR2 prereqs P4):
-//   GOOGLE_SHEETS_AUDIT_ID              — the spreadsheet ID from the sheet URL
-//   GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH — path to the service account JSON key file
+//   GOOGLE_SHEETS_AUDIT_ID  — the spreadsheet ID from the sheet URL
+//   Plus ONE of (auto-detected, base64 preferred):
+//     GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64 — base64-encoded JSON key content (Vercel / serverless)
+//     GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH   — local filesystem path (dev only — Vercel has read-only FS)
 //
 // The Postgres audit.llm_call table is the source of truth. This Sheet is a
 // secondary, human-readable tier for analytics and Gemini-readable exports.
 // On failure, we log to console.error and continue — we do NOT throw.
 //
+// Vercel deployment note: filesystem paths do NOT work on Vercel's read-only
+// serverless containers. Use the BASE64 env var instead:
+//   base64 -w0 ~/exec-db-secrets/audit-writer.json
+// Paste the output as GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64 in Vercel's
+// Project Settings → Environment Variables.
+//
 // Implementation note: this module imports `googleapis` dynamically so that
 // the app starts without error even if the package is not yet installed
-// (e.g., in test environments). The dependency must be added to packageon
+// (e.g., in test environments). The dependency must be added to package.json
 // and `pnpm install` run before production use.
 //
 // To activate:
 //   1. `pnpm --filter @exec-db/web add googleapis`
-//   2. Set GOOGLE_SHEETS_AUDIT_ID and GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH
-//      in your .env (see docs/pr2-prereqs-runbook.md section P4).
+//   2. Set GOOGLE_SHEETS_AUDIT_ID and either *_BASE64 (prod) or *_PATH (dev).
 //   3. Share the sheet with write access to the service account email.
 
 import { readFileSync } from "node:fs";
@@ -49,6 +56,55 @@ const SHEET_COLUMNS: string[] = [
   "outcome",
 ];
 
+type ServiceAccountKey = {
+  client_email: string;
+  private_key: string;
+};
+
+/**
+ * Load the service-account JSON from either env strategy.
+ * Returns null if neither is configured.
+ * Prefers BASE64 (Vercel-compatible) over PATH (dev only).
+ */
+export function loadServiceAccountKey(): ServiceAccountKey | null {
+  const base64 = process.env["GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64"];
+  if (base64) {
+    try {
+      const json = Buffer.from(base64, "base64").toString("utf-8");
+      const parsed = JSON.parse(json) as ServiceAccountKey;
+      if (!parsed.client_email || !parsed.private_key) {
+        console.error(
+          "[audit-sheet] GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64 decoded but missing client_email or private_key.",
+        );
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      console.error("[audit-sheet] Failed to decode GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64:", err);
+      return null;
+    }
+  }
+
+  const keyPath = process.env["GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH"];
+  if (keyPath) {
+    try {
+      const parsed = JSON.parse(readFileSync(keyPath, "utf-8")) as ServiceAccountKey;
+      if (!parsed.client_email || !parsed.private_key) {
+        console.error(
+          `[audit-sheet] ${keyPath} parsed but missing client_email or private_key.`,
+        );
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      console.error(`[audit-sheet] Failed to read service-account key from ${keyPath}:`, err);
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function rowToValues(row: AuditLlmCallRow): (string | number)[] {
   return [
     row.timestampUtc,
@@ -73,9 +129,13 @@ function rowToValues(row: AuditLlmCallRow): (string | number)[] {
  */
 export async function appendLlmCallToSheet(row: AuditLlmCallRow): Promise<void> {
   const sheetId = process.env["GOOGLE_SHEETS_AUDIT_ID"];
-  const keyPath = process.env["GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH"];
+  if (!sheetId) {
+    // Not configured — silently skip. This is expected in dev / CI.
+    return;
+  }
 
-  if (!sheetId || !keyPath) {
+  const keyJson = loadServiceAccountKey();
+  if (!keyJson) {
     // Not configured — silently skip. This is expected in dev / CI.
     return;
   }
@@ -93,11 +153,6 @@ export async function appendLlmCallToSheet(row: AuditLlmCallRow): Promise<void> 
   }
 
   try {
-    const keyJson = JSON.parse(readFileSync(keyPath, "utf-8")) as {
-      client_email: string;
-      private_key: string;
-    };
-
     const auth = new googleapis.google.auth.GoogleAuth({
       credentials: {
         client_email: keyJson.client_email,
