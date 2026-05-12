@@ -20,6 +20,8 @@ Reference: PR3 added these env vars beyond PR2's:
 - `COMPETITOR_DOMAINS`
 - `GOOGLE_TOKEN_ENC_KEY`
 - `CRON_SECRET` (Vercel sets automatically — no admin action)
+- `DAILY_LLM_BUDGET_USD` (cost guardrails — default 5, see Category 9)
+- `BUDGET_ALERT_RECIPIENT` (cost guardrails — the CEO's email)
 
 `GOOGLE_SHEETS_AUDIT_ID` and `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` are
 covered by `docs/pr2-prereqs-runbook.md` Category 5–6 — make sure that
@@ -165,6 +167,8 @@ Done by the dev on their laptop after the runbook above is complete.
     | `COMPETITOR_DOMAINS` | step 9 above | Priority shifters |
     | `NEXT_PUBLIC_APP_URL` | `https://<your-domain>` | Unsubscribe links |
     | `CRON_SECRET` | Vercel sets automatically — leave blank, Vercel injects it |
+    | `DAILY_LLM_BUDGET_USD` | `5` (default) — hard daily LLM spend cap in USD. Set higher for staging if needed. |
+    | `BUDGET_ALERT_RECIPIENT` | CEO Workspace email — receives breach alerts + daily cost summaries. |
 
 17. **Service-account JSON on Vercel.**
     Vercel doesn't have a filesystem like a Mac. Two options:
@@ -174,6 +178,28 @@ Done by the dev on their laptop after the runbook above is complete.
 
 18. **Vercel Cron is enabled automatically.**
     The `apps/web/vercel.json` file in the repo declares the daily/weekly schedules. After the first deploy, Vercel reads it and shows the schedules in **Settings → Cron Jobs**. `CRON_SECRET` is auto-injected.
+
+---
+
+## Category 9 — Cost guardrails (5 min)
+
+Two env vars protect against runaway LLM spend.
+
+| Env var | Default | Notes |
+|---|---|---|
+| `DAILY_LLM_BUDGET_USD` | `5` | Hard daily cap in USD. At $5/day every day of the month = $150/mo, leaving 25% headroom under the $200/mo ceiling. Raise to `10` or higher for staging if testing many LLM calls. The app fails closed — zero spend is blocked, not unlimited. |
+| `BUDGET_ALERT_RECIPIENT` | (required for alerts) | Email address that receives: (a) a breach alert the moment the cap is first exceeded any given day, and (b) a daily cost summary at 7 am LA-time each morning covering the previous UTC day. If unset, the guard still blocks calls but no email is sent. |
+
+**Breach flow**: when a request exceeds the cap, `safeAnthropic` / `safeAnthropicStream` immediately throws and writes a `killed` audit row to `audit.llm_call`. One alert email is sent per UTC day (idempotent). The guard resets at UTC midnight.
+
+25. **Add the two vars to `.env`:**
+    ```bash
+    # Cost guardrails
+    DAILY_LLM_BUDGET_USD=5
+    BUDGET_ALERT_RECIPIENT=<ceo-email@yourcompany.com>
+    ```
+
+26. **Add to Vercel** (same env-var table in Category 6, step 16 above).
 
 ---
 

@@ -9,6 +9,11 @@
       "path": "/api/cron/digest-weekly",
       "schedule": "0 14 * * 0",
       "_comment": "Runs every Sunday at 14:00 UTC = 7:00 am America/Los_Angeles (PDT). See note above for PST."
+    },
+    {
+      "path": "/api/cron/cost-summary",
+      "schedule": "0 15 * * *",
+      "_comment": "Runs daily at 15:00 UTC = 7:00 am America/Los_Angeles (PDT, UTC-7; 8:00 am in PST/UTC-8). Sends yesterday's complete cost summary to BUDGET_ALERT_RECIPIENT."
     }
   ]
 }

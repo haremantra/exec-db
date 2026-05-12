@@ -20,6 +20,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { REDACTION_CLASS_ORDER, redact, type RedactionClass } from "./redaction";
 import { recordLlmCall } from "./audit-llm";
+import { assertWithinBudget, CostGuardError, notifyBudgetBreach } from "./cost-guard";
 
 const MODEL_IDS = {
   opus: "claude-opus-4-7",
@@ -72,6 +73,42 @@ export async function safeAnthropic(
     throw new Error(
       "safeAnthropic: ANTHROPIC_API_KEY is not set. Refusing to call the SDK.",
     );
+  }
+
+  // ── Cost guard (hard floor — runs BEFORE redaction) ───────────────────────
+  // Intentionally before redaction: the guard is a kill switch that must not
+  // be bypassed by redaction failures or any later pipeline step.
+  try {
+    await assertWithinBudget();
+  } catch (err: unknown) {
+    if (err instanceof CostGuardError) {
+      // Record the killed call in audit.llm_call so invariant #4 holds.
+      const today = new Date().toISOString().slice(0, 10);
+      await recordLlmCall({
+        contactId: opts.contactId ?? null,
+        model: opts.model,
+        promptClass: opts.promptClass ?? "unknown",
+        redactedInput: "[blocked — daily budget exceeded]",
+        responseText: null,
+        redactionsApplied: [],
+        outcome: "killed",
+      }).catch((auditErr: unknown) => {
+        console.error("[safeAnthropic] Failed to write killed audit row:", auditErr);
+      });
+      // Fire-and-forget breach notification (one email per UTC day).
+      const capUsd = parseFloat(
+        process.env["DAILY_LLM_BUDGET_USD"] ?? "5",
+      );
+      notifyBudgetBreach({
+        totalUsd: err.totalUsd,
+        capUsd,
+        date: today,
+      }).catch((notifyErr: unknown) => {
+        console.error("[safeAnthropic] Failed to send breach notification:", notifyErr);
+      });
+      throw new Error(err.message);
+    }
+    throw err;
   }
 
   const promptScrub = redact(opts.prompt);
@@ -168,13 +205,45 @@ export interface SafeAnthropicStreamHandle {
  *
  * Every call writes a row to audit.llm_call (SY-017, cross-cutting invariant #4).
  */
-export function safeAnthropicStream(
+export async function safeAnthropicStream(
   opts: SafeAnthropicStreamOptions,
-): SafeAnthropicStreamHandle {
+): Promise<SafeAnthropicStreamHandle> {
   if (!process.env["ANTHROPIC_API_KEY"]) {
     throw new Error(
       "safeAnthropicStream: ANTHROPIC_API_KEY is not set. Refusing to call the SDK.",
     );
+  }
+
+  // ── Cost guard (hard floor — runs BEFORE redaction) ───────────────────────
+  try {
+    await assertWithinBudget();
+  } catch (err: unknown) {
+    if (err instanceof CostGuardError) {
+      const today = new Date().toISOString().slice(0, 10);
+      await recordLlmCall({
+        contactId: opts.contactId ?? null,
+        model: opts.model,
+        promptClass: opts.promptClass ?? "unknown",
+        redactedInput: "[blocked — daily budget exceeded]",
+        responseText: null,
+        redactionsApplied: [],
+        outcome: "killed",
+      }).catch((auditErr: unknown) => {
+        console.error("[safeAnthropicStream] Failed to write killed audit row:", auditErr);
+      });
+      const capUsd = parseFloat(
+        process.env["DAILY_LLM_BUDGET_USD"] ?? "5",
+      );
+      notifyBudgetBreach({
+        totalUsd: err.totalUsd,
+        capUsd,
+        date: today,
+      }).catch((notifyErr: unknown) => {
+        console.error("[safeAnthropicStream] Failed to send breach notification:", notifyErr);
+      });
+      throw new Error(err.message);
+    }
+    throw err;
   }
 
   const sysScrub = redact(opts.system.text);

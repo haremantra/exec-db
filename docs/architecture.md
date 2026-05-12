@@ -244,6 +244,85 @@ Four columns added in `PR3-K` that downstream streams depend on.
 
 Status `stuck` added as a distinct value (previously conflated with `blocked`): `blocked` = dependency on money/human (plan exists); `stuck` = outside exec's expertise/bandwidth (no plan yet). Both appear as separate columns in the 5-column kanban.
 
+## Cost guardrails (feat: cost-guardrails)
+
+In-app spend cap that sits below the Anthropic platform ceiling ($200/mo, S10.1).
+Protects against runaway loops (a bad prompt retrying forever, or an
+Opus-on-every-call regression) that could exhaust the monthly budget in a single day.
+
+### Spend cap formula
+
+```
+Default daily cap = $5.00 USD
+  → $5 × 31 days = $155/mo worst case (≤ $200/mo ceiling)
+  → Leaves ~25% headroom for spike days
+```
+
+Override with `DAILY_LLM_BUDGET_USD` env var (e.g. `10` for staging).
+
+### Breach flow
+
+```
+safeAnthropic() or safeAnthropicStream()
+  │
+  ├─ 1. assertWithinBudget()
+  │       ├─ getTodaysSpend() — SELECT SUM(cost_usd) FROM audit.llm_call
+  │       │    WHERE timestamp_utc::date = current_date AND outcome != 'killed'
+  │       │
+  │       ├─ spend < cap  → continue (redaction + SDK call proceed normally)
+  │       │
+  │       └─ spend ≥ cap  → throw CostGuardError { totalUsd, capUsd, calls }
+  │
+  ├─ 2. On CostGuardError:
+  │       ├─ recordLlmCall(outcome: "killed")  ← invariant #4 preserved
+  │       ├─ fire-and-forget notifyBudgetBreach()
+  │       └─ throw Error("Daily LLM budget exceeded — try again tomorrow …")
+  │
+  └─ 3. notifyBudgetBreach() — idempotent, one email per UTC day
+          ├─ Check audit.access_log for sentinel row (intent="cost_guard_breach_notified",
+          │    occurred_at::date = today)
+          ├─ If sentinel exists → return immediately (no duplicate email)
+          ├─ INSERT sentinel row (before send, prevents race)
+          └─ sendEmailViaResend → BUDGET_ALERT_RECIPIENT
+```
+
+### Daily cost summary cron
+
+`GET /api/cron/cost-summary` runs daily at 15:00 UTC (7 am LA-time PDT).
+Queries the previous UTC day's complete spend and sends a one-line summary to
+`BUDGET_ALERT_RECIPIENT`. This always sends — it is the "I have visibility" signal,
+not the breach alert. The breach alert fires at breach time via `notifyBudgetBreach`.
+
+### Idempotency
+
+`notifyBudgetBreach` writes a sentinel row to `audit.access_log` BEFORE sending the email.
+If two concurrent requests both breach the cap, the first writer owns the sentinel;
+the second finds the row and returns without sending. No duplicate emails.
+
+### Env vars
+
+| Env var | Default | Description |
+|---|---|---|
+| `DAILY_LLM_BUDGET_USD` | `5` | Hard daily cap in USD. Fail-closed: 0 spend is never blocked; the cap is a ceiling, not a minimum. |
+| `BUDGET_ALERT_RECIPIENT` | (required for alerts) | Email for breach alerts + daily summaries. If unset, guard still blocks; alert is silent. |
+
+### Cross-cutting invariant #4 (preserved)
+
+When a call is killed by the budget guard, `recordLlmCall(outcome: "killed")` is
+still called (fire-and-forget, before throwing). Every LLM call — including blocked
+ones — produces an audit row. The `outcome` column distinguishes `ok | error | killed`.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `apps/web/lib/cost-guard.ts` | `getTodaysSpend`, `assertWithinBudget`, `notifyBudgetBreach`, `CostGuardError` |
+| `apps/web/lib/anthropic.ts` | Guard wired at top of `safeAnthropic` + `safeAnthropicStream` |
+| `apps/web/app/api/cron/cost-summary/route.ts` | Daily cost summary cron handler |
+| `apps/web/__tests__/cost-guard.test.ts` | 14 tests |
+
+---
+
 ## PR2 invariants — verified by tests + CI
 
 Six cross-cutting properties that no PR2 commit is allowed to break. Each is enforced by at least one test and/or a CI step.
