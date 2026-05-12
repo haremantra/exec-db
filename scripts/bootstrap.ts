@@ -600,13 +600,17 @@ Run ${c.dim}pnpm bootstrap --help${c.reset} for full usage.
   info("(see docs/pr2-prereqs-runbook.md step 31)");
   await getOrPrompt("GOOGLE_SHEETS_AUDIT_ID", "GOOGLE_SHEETS_AUDIT_ID (the long spreadsheet ID from the URL)");
 
-  // ── Step 11: GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH ─────────────────────────
-  stepHeader("GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH");
-  info("(see docs/pr2-prereqs-runbook.md step 26 — use absolute path, no ~)");
+  // ── Step 11: GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH (local dev only) ───────
+  // For Vercel/production, use GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64 instead
+  // (see docs/pr3-prereqs-runbook.md step 17). This local-dev step assumes a
+  // filesystem path; the code at runtime prefers BASE64 if both are set.
+  stepHeader("GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH (local dev only)");
+  info("(see docs/pr2-prereqs-runbook.md step 26 — absolute path, no ~)");
+  info("For Vercel deploy, set GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64 instead — code prefers BASE64.");
 
   const saKeyPath = await getOrPrompt(
     "GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH",
-    "GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH (absolute path to audit-writer.json)",
+    "GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH (absolute path to audit-writer.json, blank to skip)",
   );
 
   if (saKeyPath && !FLAGS.checkOnly) {
