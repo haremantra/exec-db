@@ -25,11 +25,10 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
               <nav className="flex gap-4 text-sm text-neutral-600 dark:text-neutral-400">
                 <a href="/">Home</a>
                 <a href="/dashboard">Dashboard</a>
-                <a href="/retrospective">Retrospective</a>
-                <a href="/crm/contacts">CRM</a>
-                <a href="/dashboard">Dashboard</a>
                 <a href="/retrospective">Retro</a>
+                <a href="/crm/contacts">CRM</a>
                 <a href="/pm/projects">PM</a>
+                <a href="/metrics">Metrics</a>
                 <a href="/status">Status</a>
               </nav>
               <div className="flex items-center gap-2">

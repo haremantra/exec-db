@@ -71,6 +71,24 @@ vi.mock("@/lib/audit-sheet", () => ({
   },
 }));
 
+// Stub cost guard so audit-llm tests don't hit Postgres for budget checks.
+vi.mock("@/lib/cost-guard", () => ({
+  assertWithinBudget: vi.fn(async () => undefined),
+  notifyBudgetBreach: vi.fn(async () => undefined),
+  CostGuardError: class CostGuardError extends Error {
+    totalUsd: number;
+    capUsd: number;
+    calls: number;
+    constructor(opts: { totalUsd: number; capUsd: number; calls: number }) {
+      super(`budget exceeded`);
+      this.name = "CostGuardError";
+      this.totalUsd = opts.totalUsd;
+      this.capUsd = opts.capUsd;
+      this.calls = opts.calls;
+    }
+  },
+}));
+
 // Mock the Anthropic SDK for safeAnthropic / safeAnthropicStream tests
 type FakeMessage = {
   content: Array<{ type: string; text: string }>;
@@ -325,7 +343,7 @@ describe("safeAnthropicStream wrapper (cross-cutting invariant #4)", () => {
 
     const { safeAnthropicStream } = await import("@/lib/anthropic");
 
-    safeAnthropicStream({
+    await safeAnthropicStream({
       model: "sonnet",
       system: { text: "system prompt" },
       messages: [{ role: "user", text: "user message" }],
@@ -351,7 +369,7 @@ describe("safeAnthropicStream wrapper (cross-cutting invariant #4)", () => {
 
     const { safeAnthropicStream } = await import("@/lib/anthropic");
 
-    safeAnthropicStream({
+    await safeAnthropicStream({
       model: "sonnet",
       system: { text: "system prompt" },
       messages: [{ role: "user", text: "user message" }],

@@ -44,6 +44,24 @@ vi.mock("@/lib/audit-llm", () => ({
   recordLlmCall: vi.fn(async () => undefined),
 }));
 
+// Stub the cost guard so wrapper tests don't hit Postgres.
+vi.mock("@/lib/cost-guard", () => ({
+  assertWithinBudget: vi.fn(async () => undefined),
+  notifyBudgetBreach: vi.fn(async () => undefined),
+  CostGuardError: class CostGuardError extends Error {
+    totalUsd: number;
+    capUsd: number;
+    calls: number;
+    constructor(opts: { totalUsd: number; capUsd: number; calls: number }) {
+      super(`budget exceeded`);
+      this.name = "CostGuardError";
+      this.totalUsd = opts.totalUsd;
+      this.capUsd = opts.capUsd;
+      this.calls = opts.calls;
+    }
+  },
+}));
+
 beforeEach(() => {
   captured.length = 0;
   process.env["ANTHROPIC_API_KEY"] = "test-key";
@@ -131,7 +149,7 @@ describe("safeAnthropicStream — SY-016 invariant: streaming path is also gated
   it("redacts every message text + system before calling messages.stream", async () => {
     const { safeAnthropicStream } = await loadWrapper();
 
-    safeAnthropicStream({
+    await safeAnthropicStream({
       model: "opus",
       system: { text: "Patient MRN: 9876543 in chart.", cacheable: true },
       messages: [
@@ -158,7 +176,7 @@ describe("safeAnthropicStream — SY-016 invariant: streaming path is also gated
   it("aggregates redactionsApplied from all messages + system in stable order", async () => {
     const { safeAnthropicStream } = await loadWrapper();
 
-    const handle = safeAnthropicStream({
+    const handle = await safeAnthropicStream({
       model: "opus",
       system: { text: "MRN: 1234567" },
       messages: [
@@ -173,7 +191,7 @@ describe("safeAnthropicStream — SY-016 invariant: streaming path is also gated
   it("propagates cacheable flag as cache_control: ephemeral on the SDK call", async () => {
     const { safeAnthropicStream } = await loadWrapper();
 
-    safeAnthropicStream({
+    await safeAnthropicStream({
       model: "opus",
       system: { text: "system text", cacheable: true },
       messages: [{ role: "user", text: "hello", cacheable: false }],
@@ -190,13 +208,13 @@ describe("safeAnthropicStream — SY-016 invariant: streaming path is also gated
   it("throws when ANTHROPIC_API_KEY is unset", async () => {
     delete process.env["ANTHROPIC_API_KEY"];
     const { safeAnthropicStream } = await loadWrapper();
-    expect(() =>
+    await expect(
       safeAnthropicStream({
         model: "opus",
         system: { text: "x" },
         messages: [{ role: "user", text: "y" }],
       }),
-    ).toThrow(/ANTHROPIC_API_KEY/);
+    ).rejects.toThrow(/ANTHROPIC_API_KEY/);
     expect(captured).toHaveLength(0);
   });
 });
