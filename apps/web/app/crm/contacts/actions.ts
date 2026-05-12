@@ -1,5 +1,6 @@
 "use server";
 import { ConfidentialContentError } from "./errors";
+export { ConfidentialContentError };
 
 import { createHash } from "node:crypto";
 import {
@@ -39,7 +40,7 @@ const LINKEDIN_URL_RE = /^https:\/\/(www\.)?linkedin\.com\/in\/([^/?#]+)\/?$/;
  * "alice-doe"  → "Alice Doe"
  * "AliceDoe"   → "AliceDoe"  (no hyphens: leave as-is)
  */
-export async function slugToName(slug: string): string {
+export function slugToName(slug: string): string {
   return slug
     .split("-")
     .map((part) => (part.length > 0 ? part[0]!.toUpperCase() + part.slice(1) : ""))

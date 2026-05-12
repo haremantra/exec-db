@@ -482,8 +482,8 @@ describe("saveDraftToGmail (B5) — confidential-content guard (AD-003)", () => 
 
     expect(caught).not.toBeNull();
     expect(caught!.reasons.length).toBeGreaterThan(0);
-    expect(caught!.reasons.some((r) => r.includes("acquisition"))).toBe(true);
-    expect(caught!.reasons.some((r) => r.includes("LOI"))).toBe(true);
+    expect(caught!.reasons.some((r: string) => r.includes("acquisition"))).toBe(true);
+    expect(caught!.reasons.some((r: string) => r.includes("LOI"))).toBe(true);
     expect(gmailDraftCalls).toHaveLength(0);
   });
 

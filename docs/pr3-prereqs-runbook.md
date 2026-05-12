@@ -158,7 +158,8 @@ Done by the dev on their laptop after the runbook above is complete.
     | `GOOGLE_OAUTH_REDIRECT_URI` | `https://<your-domain>/api/auth/google/callback` | OAuth |
     | `GOOGLE_TOKEN_ENC_KEY` | step 7 above | OAuth-token pgcrypto |
     | `GOOGLE_SHEETS_AUDIT_ID` | from `pr2-prereqs-runbook.md` step 31 | Audit log |
-    | `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` | path on Vercel — see step 17 | Audit Sheet |
+    | `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64` | **preferred for Vercel** — see step 17 | Audit Sheet (serverless-compatible) |
+    | `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` | local `.env` only (Mac dev) | Audit Sheet (local) |
     | `RESEND_API_KEY` | step 3 above | Digest emails |
     | `RESEND_FROM_ADDRESS` | step 3 above | Digest emails |
     | `EMAIL_INTAKE_SECRET` | step 5 above | Email intake auth |
@@ -166,11 +167,15 @@ Done by the dev on their laptop after the runbook above is complete.
     | `NEXT_PUBLIC_APP_URL` | `https://<your-domain>` | Unsubscribe links |
     | `CRON_SECRET` | Vercel sets automatically — leave blank, Vercel injects it |
 
-17. **Service-account JSON on Vercel.**
-    Vercel doesn't have a filesystem like a Mac. Two options:
-    1. **Encode the JSON inline** — set `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64` to the base64-encoded file content (`base64 -w0 ~/exec-db-secrets/audit-writer.json`), and have the dev decode it at runtime. (This requires a small code change in `apps/web/lib/audit-sheet.ts` — flag for the dev.)
-    2. **Use Vercel's Secrets storage** — Project → Settings → Secrets → upload as a file. Then point `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` at the mounted secret path. (Vercel's Pro plan supports this; Hobby plan does not.)
-    Recommend option 1 if you're on Hobby; option 2 on Pro.
+17. **Service-account JSON on Vercel — use BASE64.**
+    Vercel containers are read-only — filesystem paths don't work. The code now natively supports a `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64` env var that's decoded at runtime. **Use this on Vercel**:
+
+    ```bash
+    base64 -w0 ~/exec-db-secrets/audit-writer.json
+    ```
+    Paste the output as `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_BASE64` in Vercel → Project → Settings → Environment Variables.
+
+    For local dev you can keep `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY_PATH` pointing at the absolute path on your Mac. The code prefers BASE64 if both are set.
 
 18. **Vercel Cron is enabled automatically.**
     The `apps/web/vercel.json` file in the repo declares the daily/weekly schedules. After the first deploy, Vercel reads it and shows the schedules in **Settings → Cron Jobs**. `CRON_SECRET` is auto-injected.

@@ -51,7 +51,7 @@ const TITLE_RE =
  * Extract a likely job title from a signature block.
  * Scans each line for known title keywords.
  */
-function extractTitle(body: string): string | null {
+export function extractTitle(body: string): string | null {
   for (const line of body.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (TITLE_RE.test(trimmed) && trimmed.length < 120) {
