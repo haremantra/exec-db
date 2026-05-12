@@ -354,6 +354,51 @@ export const userPref = crm.table("user_pref", {
 });
 
 /**
+ * crm.user_link — maps a Clerk user ID to a core.employee_dim row.
+ *
+ * This table is the auth bridge between Clerk (the IdP) and the app's internal
+ * UUID-based identity model. getSession() uses it to resolve a Clerk user ID to
+ * an employee_dim row so every downstream caller keeps the same Session shape.
+ *
+ * Provisioning is admin-only (app_exec). The row must exist before a user can
+ * sign in — there is no auto-create path. To offboard, delete the row.
+ *
+ * Migration SQL:
+ *   CREATE TABLE crm.user_link (
+ *     clerk_user_id  text PRIMARY KEY,
+ *     employee_id    uuid NOT NULL REFERENCES core.employee_dim(id),
+ *     tier           varchar(16) NOT NULL,
+ *     function_area  varchar(16),
+ *     created_at     timestamptz NOT NULL DEFAULT now(),
+ *     updated_at     timestamptz NOT NULL DEFAULT now()
+ *   );
+ *   -- RLS: app_runtime can SELECT all (needed before tier is known).
+ *   --      app_exec only for INSERT/UPDATE/DELETE.
+ *   ALTER TABLE crm.user_link ENABLE ROW LEVEL SECURITY;
+ *   ALTER TABLE crm.user_link FORCE ROW LEVEL SECURITY;
+ *   CREATE POLICY user_link_read ON crm.user_link FOR SELECT USING (true);
+ *   CREATE POLICY user_link_write ON crm.user_link FOR ALL
+ *     USING (app.current_tier() = 'exec_all')
+ *     WITH CHECK (app.current_tier() = 'exec_all');
+ *   GRANT SELECT ON crm.user_link TO app_runtime;
+ *   GRANT ALL    ON crm.user_link TO app_exec;
+ */
+export const userLink = crm.table("user_link", {
+  clerkUserId: text("clerk_user_id").primaryKey(),
+  employeeId: uuid("employee_id")
+    .notNull()
+    .references(() => employeeDim.id),
+  tier: varchar("tier", { length: 16 }).notNull(),
+  functionArea: varchar("function_area", { length: 16 }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+});
+
+/**
  * crm.assistant_grant — records which assistants an exec has authorized.
  *
  * An assistant with an active grant (revoked_at IS NULL) for a given exec

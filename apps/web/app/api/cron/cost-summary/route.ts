@@ -66,7 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let totalCalls = 0;
   const modelBreakdown: Record<string, { calls: number; costUsd: number }> = {};
 
-  for (const row of rows.rows as Array<{
+  for (const row of rows as unknown as Array<{
     model: string;
     calls: number;
     model_cost: number;

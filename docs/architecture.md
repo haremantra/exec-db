@@ -822,6 +822,68 @@ detectPriorityShifters(session, opts?)   [apps/web/lib/priority-shifters.ts]
 
 ---
 
+## Clerk authentication (PR4-Clerk)
+
+Replaces the Phase-0 stub auth with real Clerk-backed sessions.
+
+### Sign-in flow
+
+```
+User visits any protected route
+  │
+  ├─ clerkMiddleware() (apps/web/middleware.ts)
+  │     Verifies Clerk session JWT.
+  │     Public routes bypass Clerk: /sign-in, /sign-up, /api/auth/google/*,
+  │     /api/cron/*, /api/digest/unsubscribe, /api/intake/email.
+  │     Unauthenticated → redirect to /sign-in.
+  │
+  ├─ User lands on /sign-in  (apps/web/app/sign-in/[[...sign-in]]/page.tsx)
+  │     Renders Clerk's <SignIn /> component.
+  │
+  └─ After Clerk signs the user in → redirect to /dashboard
+       │
+       └─ getSession() (apps/web/lib/auth.ts)
+            ├─ auth() → { userId: "user_2abc…" }
+            ├─ SELECT crm.user_link WHERE clerk_user_id = "user_2abc…"
+            ├─ If no row → returns null → caller sees 401 / re-redirects to /sign-in
+            └─ Returns Session { userId, email, tier, functionArea }
+```
+
+### Fresh-user demo (what happens before provisioning)
+
+1. New user signs in via Clerk (`/sign-in`).
+2. Clerk session is valid — `auth()` returns a user ID.
+3. `crm.user_link` has no row for that user ID.
+4. `getSession()` logs a warning and returns `null`.
+5. Every server component / server action that calls `getSession()` gets `null`.
+6. The page redirects to `/sign-in` (or returns HTTP 401 for API routes).
+
+Admin must run `pnpm provision-user ...` (see `docs/pr3-prereqs-runbook.md` Category 10) to unblock the user.
+
+### Auth provider selection
+
+| `AUTH_PROVIDER` | `NODE_ENV` | Behaviour |
+|---|---|---|
+| `clerk` (default) | any | Real Clerk session + user_link lookup |
+| `stub` | `development` / `test` | Header/cookie fallback; defaults to dev UUID |
+| `stub` | `production` | Returns `null` (guard against accidental misconfiguration) |
+
+### Key files
+
+| File | Purpose |
+|---|---|
+| `apps/web/lib/auth.ts` | `getSession()` — Clerk branch + stub fallback |
+| `apps/web/middleware.ts` | `clerkMiddleware()` wrapping security headers |
+| `apps/web/app/layout.tsx` | `<ClerkProvider>`, `<UserButton>`, `<SignInButton>` |
+| `apps/web/app/sign-in/[[...sign-in]]/page.tsx` | Clerk sign-in catch-all |
+| `apps/web/app/sign-up/[[...sign-up]]/page.tsx` | Clerk sign-up catch-all |
+| `packages/db/src/schema/crm.ts` | `userLink` table (Clerk → employee_dim) |
+| `packages/db/src/rls/policies.sql` | user_link RLS policies |
+| `scripts/provision-user.ts` | Admin provisioning script |
+| `apps/web/__tests__/auth.test.ts` | 9 tests covering all auth paths |
+
+---
+
 ## PR3 complete — all 10 streams (T)
 
 Stream T (PR3-T) is the final cleanup stream. It re-integrated digest sections

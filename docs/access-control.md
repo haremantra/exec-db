@@ -22,12 +22,77 @@ Every write to `crm.*` and `pm.*` is logged via audit trigger to `audit.access_l
 
 ## Authentication
 
-Phase 0 ships a stub auth module. Phase 1 swaps to WorkOS or Clerk:
+### Clerk-backed auth (active)
 
-- SAML SSO via your Google Workspace IdP
-- SCIM provisioning so directory groups become tier roles automatically
-- Session lifetime ≤ 8h, MFA required for `exec_all`
-- IP allowlist (optional) for the comp dashboard
+Production and staging use **Clerk** as the identity provider (`AUTH_PROVIDER=clerk`).
+
+#### How `getSession()` resolves a Clerk ID to an employee_dim row
+
+```
+Request arrives at a server component or server action
+  │
+  ├─ clerkMiddleware() (apps/web/middleware.ts)
+  │     Verifies the Clerk session JWT; rejects unauthenticated requests
+  │     except for explicitly public routes (see middleware.ts).
+  │
+  └─ getSession()  (apps/web/lib/auth.ts)
+       │
+       ├─ auth()  ← @clerk/nextjs/server: returns { userId: "user_2abc…" } or null
+       │
+       ├─ If userId is null → return null  (not authenticated)
+       │
+       ├─ SELECT crm.user_link WHERE clerk_user_id = userId
+       │
+       ├─ If no row → log warning + return null  (user not provisioned)
+       │   Admin must run: pnpm provision-user --clerk-id=… --email=… --tier=…
+       │
+       └─ Return Session {
+            userId: row.employee_id,   ← the employee_dim UUID used everywhere
+            email:  clerk.emailAddresses[0],
+            tier:   row.tier,
+            functionArea: row.function_area,
+          }
+```
+
+The `Session` shape is unchanged — every server action that calls `getSession()` continues to work without modification.
+
+#### crm.user_link provisioning
+
+Admin-only. No user can self-provision. Steps:
+
+1. User signs up via Clerk (`/sign-up`).
+2. Admin copies their Clerk user ID from the Clerk dashboard → Users.
+3. Admin runs:
+   ```bash
+   pnpm provision-user --clerk-id=user_xyz --email=user@company.com --tier=exec_all
+   ```
+   Or to use a specific UUID:
+   ```bash
+   pnpm provision-user --clerk-id=user_xyz --employee-uuid=<uuid> --tier=exec_all
+   ```
+4. The `crm.user_link` row is created (upserted — idempotent).
+
+#### RLS interaction
+
+`getSession()` reads `crm.user_link` before the tier is known, so the SELECT runs as `app_runtime` without GUC-level context. The RLS policy on `user_link` permits `SELECT` unconditionally (see `packages/db/src/rls/policies.sql`). This is safe — the table contains no sensitive data beyond the Clerk⟷UUID mapping. All writes require `exec_all` tier.
+
+#### Offboarding
+
+1. Delete the `crm.user_link` row:
+   ```sql
+   DELETE FROM crm.user_link WHERE clerk_user_id = 'user_xyz';
+   ```
+   `getSession()` will return `null` on the next request, which redirects to `/sign-in`.
+2. Disable/delete the user in the Clerk dashboard to prevent token refresh.
+3. Optionally revoke any active `crm.assistant_grant` rows for the user.
+
+#### Local dev (stub mode)
+
+For local development set `AUTH_PROVIDER=stub` in `.env`. The stub reads from headers/cookies and defaults to the dev UUID `00000000-0000-0000-0000-000000000001` (tier `exec_all`) when none are present. Stub mode is disabled in production even if `AUTH_PROVIDER=stub` is set.
+
+- SAML SSO via your Google Workspace IdP is available as a future Clerk configuration option.
+- MFA required for `exec_all` can be enforced in the Clerk dashboard under **Security → MFA**.
+- IP allowlist (optional) for the comp dashboard can be added as a Clerk organization policy or edge middleware.
 
 ## Exports
 

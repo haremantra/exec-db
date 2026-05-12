@@ -17,7 +17,8 @@
     "db:seed": "pnpm --filter @exec-db/db db:seed",
     "db:studio": "pnpm --filter @exec-db/db db:studio",
     "vision-check": "tsx scripts/vision-check.ts",
-    "bootstrap": "tsx scripts/bootstrap.ts"
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "provision-user": "tsx scripts/provision-user.ts"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.88.0",

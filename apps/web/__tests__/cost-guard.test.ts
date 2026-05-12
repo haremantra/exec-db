@@ -72,13 +72,13 @@ vi.mock("@/lib/db", () => ({
           queryStr.includes("access_log") ||
           queryStr.includes("cost_guard_breach_notified")
         ) {
-          return Promise.resolve({
-            rows: sentinelExists ? [{ id: "existing-id" }] : [],
-          });
+          return Promise.resolve(
+            sentinelExists ? [{ id: "existing-id" }] : [],
+          );
         }
 
         // Spend query (getTodaysSpend / cost-summary route) — checks llm_call.
-        return Promise.resolve({ rows: mockTodayRows });
+        return Promise.resolve(mockTodayRows);
       },
       insert(table: unknown) {
         const t = tableName(table);

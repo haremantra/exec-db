@@ -101,7 +101,7 @@ export async function getTodaysSpend(session?: Session): Promise<TodaysSpend> {
   let totalCalls = 0;
   const modelBreakdown: Record<string, number> = {};
 
-  for (const row of rows.rows as Array<{
+  for (const row of rows as unknown as Array<{
     model: string;
     calls: number;
     model_cost: number;
@@ -190,7 +190,7 @@ export async function notifyBudgetBreach(params: BreachNotifyParams): Promise<vo
     `);
   });
 
-  if ((existing.rows as unknown[]).length > 0) {
+  if ((existing as unknown as unknown[]).length > 0) {
     // Already notified today — idempotent no-op.
     return;
   }
