@@ -79,14 +79,14 @@ export async function buildCrmExport(
   const zip = new JSZip();
 
   // JSON tables
-  zip.file("contacton", JSON.stringify(contacts, null, 2));
-  zip.file("accounton", JSON.stringify(accounts, null, 2));
-  zip.file("call_noteon", JSON.stringify(callNotes, null, 2));
-  zip.file("drafton", JSON.stringify(drafts, null, 2));
-  zip.file("calendar_eventon", JSON.stringify(calendarEvents, null, 2));
-  zip.file("email_threadon", JSON.stringify(emailThreads, null, 2));
-  zip.file("projecton", JSON.stringify(projects, null, 2));
-  zip.file("taskon", JSON.stringify(tasks, null, 2));
+  zip.file("contact.json", JSON.stringify(contacts, null, 2));
+  zip.file("account.json", JSON.stringify(accounts, null, 2));
+  zip.file("call_note.json", JSON.stringify(callNotes, null, 2));
+  zip.file("draft.json", JSON.stringify(drafts, null, 2));
+  zip.file("calendar_event.json", JSON.stringify(calendarEvents, null, 2));
+  zip.file("email_thread.json", JSON.stringify(emailThreads, null, 2));
+  zip.file("project.json", JSON.stringify(projects, null, 2));
+  zip.file("task.json", JSON.stringify(tasks, null, 2));
 
   // One .md file per call note
   const notesFolder = zip.folder("notes");
