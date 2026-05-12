@@ -496,3 +496,31 @@ DROP TRIGGER IF EXISTS llm_call_no_mutate ON audit.llm_call;
 CREATE TRIGGER llm_call_no_mutate
   BEFORE UPDATE OR DELETE ON audit.llm_call
   FOR EACH ROW EXECUTE FUNCTION audit.llm_call_append_only();
+
+-- ============================================================================
+-- crm.user_link — Clerk → employee_dim bridge table (PR4-Clerk)
+--
+-- Read: app_runtime can SELECT all rows. This query runs BEFORE the session tier
+--       is known (it's how we resolve the Clerk user ID to a tier), so we can't
+--       gate on app.current_tier(). Granting SELECT to app_runtime is safe
+--       because the table contains no sensitive data beyond the Clerk<>UUID
+--       mapping.
+-- Write: app_exec only (admin provisions users; no self-service path).
+-- ============================================================================
+
+ALTER TABLE crm.user_link ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.user_link FORCE ROW LEVEL SECURITY;
+
+-- Any authenticated connection via app_runtime may read (pre-auth lookup).
+DROP POLICY IF EXISTS user_link_read ON crm.user_link;
+CREATE POLICY user_link_read ON crm.user_link FOR SELECT USING (true);
+
+-- Writes are restricted to exec_all tier (admin provisions / deprovisions users).
+DROP POLICY IF EXISTS user_link_write ON crm.user_link;
+CREATE POLICY user_link_write ON crm.user_link FOR ALL
+  USING (app.current_tier() = 'exec_all')
+  WITH CHECK (app.current_tier() = 'exec_all');
+
+-- Schema grants: app_runtime gets SELECT only; app_exec gets full DML.
+GRANT SELECT           ON crm.user_link TO app_runtime;
+GRANT INSERT, UPDATE, DELETE ON crm.user_link TO app_exec;

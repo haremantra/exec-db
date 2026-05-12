@@ -234,6 +234,94 @@ Done by the dev on their laptop after the runbook above is complete.
 
 ---
 
+---
+
+## Category 9 — Local-dev auth mode (stub) vs. production auth (Clerk) (3 min)
+
+The app supports two auth modes selected by the `AUTH_PROVIDER` env var:
+
+| Value | When to use |
+|---|---|
+| `stub` | Local development and automated tests. No Clerk keys required. Falls back to a hard-coded dev UUID (`00000000-0000-0000-0000-000000000001`, tier `exec_all`). **Never use in production.** |
+| `clerk` | Staging and production. Requires `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. |
+
+**Default recommendation**: keep `.env` set to `AUTH_PROVIDER=stub` for local work.
+Flip to `AUTH_PROVIDER=clerk` only when you want to test the real sign-in flow locally
+(requires running `pnpm provision-user` first — see Category 10).
+
+---
+
+## Category 10 — Clerk setup (15 min)
+
+Required for staging and production. Skip this category if you are only running locally with `AUTH_PROVIDER=stub`.
+
+25. **Create a Clerk application.**
+    1. Open <https://clerk.com> and sign in (or create a free account).
+    2. Click **Create application**.
+    3. Name: `exec-db`. Enable **Email + Password** and optionally **Google** as sign-in methods.
+    4. Click **Create application**.
+
+26. **Copy API keys.**
+    In the Clerk dashboard → **API Keys**:
+    - Copy **Publishable key** (starts with `pk_…`) → `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+    - Copy **Secret key** (starts with `sk_…`) → `CLERK_SECRET_KEY`.
+
+27. **Add allowed URLs.**
+    Clerk dashboard → **Domains** → **Add domain** (or click the existing `localhost` domain):
+    - For local dev (if you want to test Clerk): `http://localhost:3000`.
+    - For production: `https://<your-domain>`.
+
+28. **Configure redirect URLs.**
+    Clerk dashboard → **Paths** (or **Customization → Paths** in newer dashboard):
+    - Sign-in URL: `/sign-in`
+    - Sign-up URL: `/sign-up`
+    - After sign-in URL: `/dashboard`
+    - After sign-up URL: `/dashboard`
+    These match the `NEXT_PUBLIC_CLERK_*` env vars in `.env.example`.
+
+29. **JWT template (optional).**
+    If you need custom claims (e.g. to pass tier in the JWT for edge functions),
+    go to Clerk dashboard → **JWT Templates → New template**. For the base setup
+    this is not required — `getSession()` fetches tier from `crm.user_link` at
+    request time.
+
+30. **Provision the first user.**
+    After signing in via Clerk for the first time, your Clerk user ID will appear
+    in the Clerk dashboard → **Users**. Copy it, then run:
+    ```bash
+    pnpm provision-user --clerk-id=user_<your-id> --email=<ceo@company.com> --tier=exec_all
+    ```
+    This inserts a `crm.user_link` row so `getSession()` can resolve the Clerk ID
+    to the `employee_dim` UUID.
+
+    To use a specific employee UUID instead of looking up by email:
+    ```bash
+    pnpm provision-user --clerk-id=user_<your-id> --employee-uuid=00000000-0000-0000-0000-000000000001 --tier=exec_all
+    ```
+
+31. **Set Clerk env vars in Vercel.**
+    Vercel → Project → Settings → Environment Variables. Add for Production + Preview:
+    | Name | Value |
+    |---|---|
+    | `AUTH_PROVIDER` | `clerk` |
+    | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_…` from step 26 |
+    | `CLERK_SECRET_KEY` | `sk_…` from step 26 |
+    | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
+    | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
+    | `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | `/dashboard` |
+    | `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | `/dashboard` |
+
+32. **Offboarding.**
+    To revoke access for a user, delete their `crm.user_link` row:
+    ```sql
+    DELETE FROM crm.user_link WHERE clerk_user_id = 'user_<id>';
+    ```
+    This is enough — the user will receive `null` from `getSession()` on their next
+    request (Clerk session may still be valid but the app gate returns null → HTTP 401).
+    Also disable/delete the user in the Clerk dashboard to prevent token refresh.
+
+---
+
 ## What you handed off
 
 After this runbook + `pr2-prereqs-runbook.md`, the production environment has:
