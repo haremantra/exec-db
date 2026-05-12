@@ -1,5 +1,72 @@
 # Architecture
 
+## Metrics page (/metrics)
+
+The `/metrics` page surfaces six "ready-today" signals — data that is
+queryable from existing tables today, with no additional instrumentation work.
+It is visible only to the `exec_all` tier (returns a 403-style message otherwise;
+does not redirect).
+
+### The six signals
+
+| # | Signal | Source table(s) | Headline number |
+|---|---|---|---|
+| 1 | **Disagree rate on Do-this-first** | `audit.access_log` (intent=`ranker_override`) / `audit.llm_call` (prompt_class=`rank`) | overrides ÷ rankings |
+| 2 | **Sensitive-flag activations** | `crm.contact.sensitive_flag` + `updated_at` | total flagged + 7-day delta + by-tag table |
+| 3 | **Draft save vs. discard ratio** | `crm.draft.status` | save rate % + pending/saved/discarded counts |
+| 4 | **LLM call row count vs. expected** | `audit.llm_call` | total rows (14d) + text-bar chart by prompt_class |
+| 5 | **Retrospective judgements** | `audit.access_log` (intent=`retrospective_judgement`, metadata.judgement) | kept/partial/broke counts |
+| 6 | **Resend delivery stats** | External (Resend dashboard) | Link to resend.com/emails |
+
+### Decision-gate table
+
+The following thresholds indicate when each signal requires a response:
+
+| Signal | Green (working) | Amber (watch) | Red (act) |
+|---|---|---|---|
+| Disagree rate | < 20% | 20–50% | > 50% — ranker needs recalibration |
+| Sensitive-flag activations | Any non-zero total | > 10 new in 7 days | Unexpected spike — review flagging process |
+| Draft save rate | > 60% saved | 40–60% | < 40% — drafts are low quality or unused |
+| LLM call count | Growing week-over-week | Flat | Declining — check for workflow abandonment |
+| Kept-promise rate | > 70% kept | 50–70% | < 50% — ranker is not aligning with exec priorities |
+| Resend delivery | > 95% delivered, > 40% open | 80–95% delivered | < 80% delivered — check SPF/DKIM, bounce list |
+
+### Data flow
+
+```
+GET /metrics
+  │
+  ├─ getSession() — returns 403 message if tier != exec_all
+  │
+  ├─ Promise.all([
+  │     getDisagreeRate(session)           — audit.access_log + audit.llm_call
+  │     getSensitiveFlagActivations(session) — crm.contact
+  │     getDraftStatusDistribution(session) — crm.draft
+  │     getLlmCallsByClass(session, 14)    — audit.llm_call
+  │     getRetrospectiveJudgements(session) — audit.access_log
+  │  ])
+  │
+  └─ Render 6 sections with headline numbers, text bars, tables
+```
+
+All queries go through `query(ctx, …)` so RLS applies automatically.
+No LLM calls — pure SQL aggregation.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `apps/web/app/metrics/page.tsx` | Server component; force-dynamic; 6 signal sections |
+| `apps/web/lib/metrics.ts` | Pure data helpers; one query per helper |
+| `apps/web/__tests__/metrics.test.ts` | 10 tests; includes access-control regression guard |
+
+### Nav link
+
+Added to `apps/web/app/layout.tsx` between `/retrospective` and `/status`.
+The page itself enforces exec_all access; the nav link is always visible.
+
+---
+
 ## Retrospective + check-in (Stream R — PR3-R)
 
 ### Weekly retrospective view (`/retrospective`)
